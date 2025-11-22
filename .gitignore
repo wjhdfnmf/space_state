@@ -1,0 +1,17 @@
+
+# Ignore build and development directories
+.pio/
+
+# Ignore development files
+dev/
+
+# Ignore Python environment files
+rocket_sim/
+
+# Ignore cache files
+__pycache__/
+.pytest_cache/
+.vscode/
+
+# Ignore emphemeris files - downloaded separately
+ephemeris/
