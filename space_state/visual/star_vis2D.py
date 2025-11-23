@@ -3,8 +3,8 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from star_utils import au_to_km, apd_kps, body_position, body_velocity, au2day2_mjkg
-from star_constants import BODIES, ts, epoch_jd
+from base.star_utils import au_to_km, apd_kps, body_position, body_velocity, au2day2_mjkg
+from base.star_constants import BODIES, ts, epoch_jd
 
 def plot_orbital_metrics(
     result,

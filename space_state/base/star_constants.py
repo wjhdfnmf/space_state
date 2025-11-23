@@ -2,11 +2,11 @@
 
 from skyfield.api import PlanetaryConstants, load
 
-from star_logger import logger
-from star_utils import convert_gm, km_to_au, mean_radius_km
-from star_config import DEFAULT_CONFIG
+from .star_logger import logger
+from .star_utils import convert_gm, km_to_au, mean_radius_km
+from .star_config import CONFIG
 
-epoch_jd = DEFAULT_CONFIG.start_time.tt.jd
+epoch_jd = CONFIG.start_time.tt.jd
 ts = load.timescale() 
 
 EPH = load('./ephemeris/de440.bsp') # Auto download
@@ -15,6 +15,8 @@ pc.read_text(load('./ephemeris/gm_de440.tpc')) # https://naif.jpl.nasa.gov/pub/n
 pc.read_text(load('./ephemeris/pck00011.tpc')) # https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc
 c = pc.variables
 
+# ------------------- CONSTANTS -------------------
+# Gravitational parameters and radii for celestial bodies
 BODIES = {
     'sun': {
         "skyfield": EPH['sun'],
@@ -53,6 +55,13 @@ BODIES = {
     }
 }
 
+ # Altitudes in km
+ORBITS = {
+    'earth_leo': 400,
+    'earth_gso': 35786,
+    'moon_orbit': 100,
+}
+
 # ------------------- TEST OUTPUT -------------------
 
 def log_config() -> None:
@@ -63,5 +72,7 @@ def log_config() -> None:
         logger.info(f"  BODIES.{body_name}.mu: {mu:.6e} AU^3/day^2")
         if radius is not None:
             logger.info(f"  BODIES.{body_name}.radius: {radius:.6e} AU")
+    for orbit_name, altitude_km in ORBITS.items():
+        logger.info(f"  ORBITS.{orbit_name}: {altitude_km:.1f} km")
 
 log_config()

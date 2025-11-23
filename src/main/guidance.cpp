@@ -1,13 +1,4 @@
 #include <Arduino.h>
-#undef B0
-#undef B1
-#undef B2
-#undef B3
-#undef B4
-#undef B5
-#undef B6
-#undef B7
-
 #include <FreeRTOS.h>
 #include <task.h>
 #include <queue.h>

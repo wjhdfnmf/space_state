@@ -26,6 +26,11 @@ def au3d2_km3s2(au3_day2: float) -> float:
     # Convert from AU³/day² to km³/s²
     return (au3_day2 * u.au**3 / u.day**2).to(u.km**3 / u.s**2).value
 
+# Mass conversions
+def kgps_kgpd(kg_per_s: float) -> float:
+    # Convert mass flow rate from kg/s to kg/day
+    return (kg_per_s * u.kg / u.s).to(u.kg / u.day).value
+
 # Length conversions
 def km_to_au(km: float) -> float:
     # Convert kilometers to astronomical units

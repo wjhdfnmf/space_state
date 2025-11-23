@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
-from star_logger import logger
+
+from .star_logger import logger
 
 
 # Type aliases for unit clarity (no runtime cost)
@@ -39,21 +40,6 @@ class GuidanceCycle:
     t: Time                         # Time of guidance update
     controller: ControllerCycle
 
-# Immutable state vector
-@dataclass(frozen=True)
-class StateVector:
-    r: Vector     # shape (3,)
-    v: Vector     # shape (3,)
-    m: Mass = 0.0   # mass in kg
-    t: Time = 0.0   # time in days past epoch
-
-    def to_array(self) -> NDArray[np.float64]: # shape (7,)
-        return np.concatenate([self.r, self.v, [self.m]])
-    
-    @classmethod
-    def from_array(cls, y: State, t: Time) -> 'StateVector':
-        return cls(r=y[0:3], v=y[3:6], m=y[6], t=t)
-
 # MAIN CLASS FOR PROPAGATION RESULTS
 @dataclass
 class PropagationResult:
@@ -67,23 +53,71 @@ class PropagationResult:
     events: List[dict[str, Any]] = field(default_factory=list)  # List of event dictionaries
     conservation: Dict[str, Any]= field(default_factory=dict) # e.g., energy, momentum
 
+    def initialize(self, state: NDArray[np.float64], time: Time) -> None:
+        """Initialize propagation result with initial state."""
+        if state.shape != (7,):
+            raise ValueError("initalize: state must have shape (7,)")
+        self.clear()
+        self.t = np.array([time])
+        self.y = state.reshape(7, 1)
+
     @property
-    def state(self) -> StateVector:
+    def state(self) -> NDArray[np.float64]:
         """Return current state as StateVector."""
-        if self.t.size == 0:
-            raise ValueError("PropagationResult has no data points")
-        return StateVector.from_array(self.y[:, -1], self.t[-1])
+        return self.y[:, -1]
+    
+    @property
+    def time(self) -> Time:
+        """Return current time in days."""
+        return self.t[-1]
 
     def append(self, phase: 'PropagationResult') -> None:
         """Append another propagation phase to this result."""
         if not np.isclose(self.t[-1], phase.t[0]):
             logger.warning("append propagation: time discontinuity detected between phases.")
+        if phase.y.shape[0] != 7:
+            raise ValueError("append propagation: phase.y must have shape (7, N)")
+        if phase.t.size != phase.y.shape[1]:
+            raise ValueError("append propagation: phase.t and phase.y size mismatch")
+        if phase.t[0] == self.t[-1]:
+            phase.t = phase.t[1:]
+            phase.y = phase.y[:, 1:]
+        
         self.t = np.concatenate([self.t, phase.t])
         self.y = np.concatenate([self.y, phase.y], axis=1)
         self.guidance.extend(phase.guidance)
         self.events.extend(phase.events)
         self.conservation.update(phase.conservation)
 
+    def append_raw(self, t_new: NDArray[np.float64], y_new: NDArray[np.float64]) -> None:
+        """Append raw time and state arrays to the result."""
+        if not np.isclose(self.t[-1], t_new[0]):
+            logger.warning("append_raw: time discontinuity detected between phases.")
+        if y_new.shape[0] != 7:
+            raise ValueError("append_raw: y_new must have shape (7, N)")
+        if t_new.size != y_new.shape[1]:
+            raise ValueError("append_raw: t_new and y_new size mismatch")
+        if t_new[0] == self.t[-1]:
+            t_new = t_new[1:]
+            y_new = y_new[:, 1:]
+        
+        self.t = np.concatenate([self.t, t_new])
+        self.y = np.concatenate([self.y, y_new], axis=1)
+    
+    def clear(self) -> None:
+        """Clear all stored data."""
+        self.t = np.array([])
+        self.y = np.empty((7, 0))
+        self.guidance.clear()
+        self.events.clear()
+        self.conservation.clear()
+
     def log_cycle(self, t: Time, cycle: ControllerCycle) -> None:
         """Log a guidance cycle at time t."""
         self.guidance.append(GuidanceCycle(t=t, controller=cycle))
+
+    def describe_state(self) -> None:
+        """Log a summary of the last state."""
+        logger.debug(f"Last state at t={self.time:.3f} days: r={self.state[:3]}, v={self.state[3:6]}, m={self.state[6]:.3f} kg")
+        logger.debug(f"Normal position: {np.linalg.norm(self.state[:3]):.6f} AU")
+        logger.debug(f"Normal velocity: {np.linalg.norm(self.state[3:6]):.6f} AU/day")

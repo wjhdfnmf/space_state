@@ -1,12 +1,11 @@
 # finite_burn_zemzev.py
 import numpy as np
 from scipy.integrate import solve_ivp
-from star_utils import days_to_seconds, sec_to_days, mps_to_apd, mps2_apd2
-from star_config import g0, SECONDS_PER_DAY
-from star_dynamics import n_body_acceleration
+from base.star_utils import days_to_seconds, sec_to_days, mps_to_apd, mps2_apd2
+from base.star_config import CONFIG
+from base.star_dynamics import n_body_acceleration
 
 AU = 149597870.7e3                          # m per AU
-SEC_PER_DAY = SECONDS_PER_DAY
 
 class FiniteBurnZEMZEV:
     def __init__(self, target_r, target_v, spacecraft, bodies,
@@ -22,7 +21,7 @@ class FiniteBurnZEMZEV:
 
     def _primer_magnitude(self, Tgo_sec: float, m0: float) -> tuple[float, float]:
         """Battin/D’Souza exact variable-mass primer (seconds·m/s) and remaining Δv (m/s)"""
-        ve = self.sc.total_isp * g0
+        ve = self.sc.total_isp * CONFIG.g0
         a0 = self.sc.total_thrust / m0
         if a0 <= 0 or Tgo_sec <= 0:
             return 0.0, 0.0
@@ -38,7 +37,7 @@ class FiniteBurnZEMZEV:
         if Tgo_days <= 0:
             return r0.copy(), v0.copy(), m0
 
-        ve = self.sc.total_isp * g0
+        ve = self.sc.total_isp * CONFIG.g0
         F = self.sc.total_thrust
         mdot = F / ve                                 # positive kg/s
 
@@ -60,6 +59,9 @@ class FiniteBurnZEMZEV:
         return yf[:3], yf[3:6], yf[6]
 
     def update(self, t, y):
+        return 0.0, np.array([1.0, 0.0, 0.0]), 0.0  # Placeholder for compatibility
+    
+    
         if t - self.last_t < self.cycle:
             return self.vgo_thr + 10.0, self.dir.copy()
 
@@ -77,14 +79,14 @@ class FiniteBurnZEMZEV:
             zev = vf - self.v_t
 
             lam_sec, vgo = self._primer_magnitude(days_to_seconds(Tgo_guess), m)
-            lam = lam_sec * SEC_PER_DAY                    # → AU·day
+            lam = lam_sec * CONFIG.SECONDS_PER_DAY                    # → AU·day
 
             primer = zem + lam * zev
             dir_guess = -primer / (np.linalg.norm(primer) + 1e-20)
 
             # Update horizon with exact remaining Δv
             if vgo > 0.1:
-                ve = self.sc.total_isp * g0
+                ve = self.sc.total_isp * CONFIG.g0
                 mf_target = max(m * np.exp(-vgo / ve), self.sc.dry_mass)
                 Tgo_guess = sec_to_days((m - mf_target) / (self.sc.total_thrust / ve))
             else:
@@ -93,7 +95,7 @@ class FiniteBurnZEMZEV:
         # Final prediction & output
         rf, vf, mf = self._predict_powered(t, r, v, m, dir_guess, Tgo_guess)
         lam_sec, vgo = self._primer_magnitude(days_to_seconds(Tgo_guess), m)
-        lam = lam_sec * SEC_PER_DAY
+        lam = lam_sec * CONFIG.SECONDS_PER_DAY                    # → AU·day
         primer = (rf - self.r_t) + lam * (vf - self.v_t)
         self.dir = -primer / (np.linalg.norm(primer) + 1e-20)
 

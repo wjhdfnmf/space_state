@@ -3,9 +3,9 @@ import numpy as np
 from typing import List
 from dataclasses import dataclass
 
-from star_logger import logger
-from star_config import g0
-from star_utils import mps2_apd2
+from .star_logger import logger
+from .star_config import CONFIG
+from .star_utils import mps2_apd2, kgps_kgpd
 
 
 class Thruster:
@@ -16,8 +16,8 @@ class Thruster:
             thrust_max: N (100% throttle, vacuum)
             isp: seconds (vacuum)
         """
-        self._thrust_max = float(thrust_max)
-        self._isp = float(isp)
+        self.__thrust_max = float(thrust_max)
+        self.__isp = float(isp)
         self._throttle = 0.0  # 0.0 to 1.0
 
     @property
@@ -25,22 +25,22 @@ class Thruster:
         """Current thrust in N."""
         if self._throttle == 0.0:
             return 0.0
-        return self._thrust_max * self._throttle
+        return self.__thrust_max * self._throttle
     
     @property
     def _thrust_max(self) -> float:
         """Maximum thrust in N."""
-        return self._thrust_max
+        return self.__thrust_max
     
     @property
     def _isp(self) -> float:
         """Specific impulse [s] at current throttle."""
-        return self._isp  # Constant for now
+        return self.__isp  # Constant for now
     
     @property
     def _velocity_exhaust(self) -> float:
         """Exhaust velocity [m/s] at current ISP."""
-        return self._isp * g0  # m/s
+        return self.__isp * CONFIG.g0  # m/s
 
     @property
     def _mdot(self) -> float:
@@ -112,34 +112,36 @@ class Spacecraft:
         # Weighted average by thrust
         return sum(t._isp * t._thrust for t in self.thrusters) / self.total_thrust
 
-    @property
+    @property ##
     def total_mdot(self) -> float:
-        return sum(t._mdot for t in self.thrusters) # kg/s
+        if not self.active:
+            return 0.0
+        return kgps_kgpd(sum(t._mdot for t in self.thrusters)) # kg/s
     
     @property
     def active(self) -> bool:
         return self.total_thrust > 0 and self.propellant_mass > 0
     
-    def set_throttle(self, level: float):
+    def set_throttle(self, level: float): ###
         """Set throttle level (0.0 to 1.0) for all thrusters."""
         if level < 0.0 or level > 1.0:
             raise ValueError("Throttle level must be between 0.0 and 1.0")
         for thruster in self.thrusters:
             thruster._set_throttle(level)
 
-    def get_thrust_vector(self) -> np.ndarray:
+    def get_thrust_vector(self) -> np.ndarray: ###
         """Total thrust acceleration in AU/day²."""
         if not self.active:
             return np.zeros(3)
         acc_m_s2 = self.total_thrust / self.total_mass  # N / kg = m/s²
-        acc_au_day2 = mps2_apd2(acc_m_s2)  # m/s² → AU/day²
-        return acc_au_day2 * self.thrust_direction
+        return mps2_apd2(acc_m_s2) * self.thrust_direction # m/s² → AU/day²
     
-    def consume_propellant(self, dmass: float):
+    def update_propellant(self, mass: float): ###
         """Consume propellant over time interval dt_sec."""
-        if not self.active:
-            raise RuntimeError("Cannot consume propellant: thrusters inactive or no propellant")
-        self._propellant_mass = max(0.0, self._propellant_mass - dmass)
+        remaining = mass - self.dry_mass
+        if remaining < 0.0:
+            logger.warning(f"{self._name}: Propellant exhausted!")
+        self._propellant_mass = max(0.0, remaining)
 
     def log(self):
         logger.info(f"Spacecraft: {self._name}")

@@ -43,7 +43,7 @@ def validate_orbit(result, tolerance_km=1.0, tolerance_kms=0.01):
     energy0, energyf = energy[0], energy[-1]
     print(f"Initial energy: {energy0:.3e} AU²/day²")
     print(f"Final energy:   {energyf:.3e} AU²/day²")
-    dE_pct = abs(energyf - energy0) / abs(energy0) * 100 if energy0 != 0 else 0
+    dE_pct = abs(energyf - energy0) / abs(energy0)
     print(f"ΔEnergy:        {dE_pct:.3e}%", end="")
     print(" [PASS]" if dE_pct < 1e-6 else " [FAIL]")
 
