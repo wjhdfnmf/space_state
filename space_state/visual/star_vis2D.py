@@ -5,11 +5,13 @@ from plotly.subplots import make_subplots
 
 from base.star_utils import au_to_km, apd_kps, body_position, body_velocity, au2day2_mjkg
 from base.star_constants import BODIES, ts, epoch_jd
+from base.star_logger import logger
+from base.star_config import CONFIG
 
 def plot_orbital_metrics(
     result,
-    bodies_to_plot,
-    title="Orbital Visualizer 2D"
+    ship,
+    title="Orbital Visualizer 2D",
 ):
     t_days = result.t
     t_hours = t_days # * 24.0
@@ -18,8 +20,13 @@ def plot_orbital_metrics(
     v_au_day = result.y[3:6, :].T # (N, 3) velocity in SSB
     m_kg = result.y[6, :].T      # (N,) mass in kg
 
+    propellant_mass_tons = (m_kg - ship.dry_mass) / 1000.0
+    initial_prop_mass_tons = (result.y[6, 0] - ship.dry_mass) / 1000.0
+
     r_km = au_to_km(r_au)
     v_kms = apd_kps(v_au_day)
+
+    bodies_to_plot = CONFIG.all_bodies
 
     # Precompute body positions over time
     body_pos_au = {}
@@ -32,7 +39,7 @@ def plot_orbital_metrics(
                 [body_velocity(BODIES[body], ts.tt_jd(epoch_jd + t)) for t in t_days])
 
     # ------------------------------------------------------------------
-    # 1. Earth-Centered Altitude (from surface)
+    # Earth-Centered Altitude (from surface)
     # ------------------------------------------------------------------
     if 'earth' in bodies_to_plot and 'earth' in body_pos_au:
         earth_pos_au = body_pos_au['earth']
@@ -41,7 +48,7 @@ def plot_orbital_metrics(
         altitude_earth_km = dist_earth_center_km - au_to_km(BODIES['earth']['radius'])  # FROM SURFACE
 
     # ------------------------------------------------------------------
-    # 2. Moon Altitude (from surface)
+    # Moon Altitude (from surface)
     # ------------------------------------------------------------------
     altitude_moon_km = None
     if 'moon' in bodies_to_plot and 'moon' in body_pos_au:
@@ -51,7 +58,7 @@ def plot_orbital_metrics(
         altitude_moon_km = dist_moon_center_km - au_to_km(BODIES['moon']['radius'])  # FROM SURFACE
 
     # ------------------------------------------------------------------
-    # 3. Orbital Elements (Earth-Centered, Inertial)
+    # Orbital Elements (Earth-Centered, Inertial)
     # ------------------------------------------------------------------
     # At each time step
     earth_center_au = body_pos_au['earth']
@@ -76,10 +83,22 @@ def plot_orbital_metrics(
     peri_km = au_to_km(a * (1 - e) - BODIES['earth']['radius'])
 
     # ------------------------------------------------------------------
-    # 4. Thrust (placeholder)
+    # Thrust
     # ------------------------------------------------------------------
     thrust_mN_per_kg = np.zeros_like(t_hours)
-
+    if result.guidance and ship is not None:
+        # Extract time and thrust from logged guidance cycles
+        guidance_times = np.array([cycle.t for cycle in result.guidance])  # days
+        guidance_throttle = np.array([cycle.controller.throttle for cycle in result.guidance])
+        
+        # Convert throttle → specific thrust (mN/kg)
+        max_thrust_N = ship.max_thrust
+        mass_kg = m_kg.mean()     # approximate average mass
+        specific_thrust_mN_per_kg = (max_thrust_N / mass_kg) * 1000 * guidance_throttle
+        
+        # Interpolate throttle level for plotting
+        throttle_level = np.array([cycle.controller.throttle for cycle in result.guidance])
+    
     # ------------------------------------------------------------------
     # PLOTLY — 6 Subplots
     # ------------------------------------------------------------------
@@ -132,8 +151,25 @@ def plot_orbital_metrics(
             'lines': [
                 {'name': "Thrust", 'y': thrust_mN_per_kg, 'line': dict(color="#FF0000")},
             ],
-            'enabled': False,
-        }
+            'enabled': np.any(thrust_mN_per_kg > 0),
+        },
+        'propellant_mass': {
+            'title': "Propellant Mass [tons]",
+            'yaxis_title': "Mass [t]",
+            'lines': [
+                {'name': "Mass", 'y': propellant_mass_tons, 'line': dict(color="#8A2BE2")},
+            ],
+            'range': [0, initial_prop_mass_tons],
+            'enabled': propellant_mass_tons is not None,
+        },
+        'throttle': {
+            'title': "Throttle Level",
+            'yaxis_title': "Throttle",
+            'lines': [
+                {'name': "Throttle", 'y': throttle_level, 'line': dict(color="#FF6347")},
+            ],
+            'enabled': np.any(throttle_level > 0),
+        },
     }
 
     active_tiles = [tile for tile in tiles.values() if tile['enabled']]
@@ -144,7 +180,8 @@ def plot_orbital_metrics(
         rows=n_rows, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.03,
-        subplot_titles=titles
+        subplot_titles=titles,
+        row_heights=[1 / n_rows] * n_rows
     )
 
     for each in active_tiles:
@@ -153,11 +190,15 @@ def plot_orbital_metrics(
                 go.Scatter(x=t_hours, y=line['y'], name=line['name'], line=line['line']),
                 row=active_tiles.index(each) + 1, col=1
             )
-            fig.update_yaxes(title_text=each['yaxis_title'], row=active_tiles.index(each) + 1, col=1)
+
+            if 'range' in each:
+                fig.update_yaxes(title_text=each['yaxis_title'], range=each['range'], row=active_tiles.index(each) + 1, col=1)
+            else:
+                fig.update_yaxes(title_text=each['yaxis_title'], row=active_tiles.index(each) + 1, col=1)
 
     # Layout
     fig.update_layout(
-        height=1000,
+        height=2000,
         title_text=title,
         title_x=0.5,
         plot_bgcolor='#1a1a1a',
@@ -166,10 +207,8 @@ def plot_orbital_metrics(
         legend=dict(bgcolor="#1a1a1a", bordercolor="gray")
     )
 
-    fig.update_xaxes(title_text="Time [hours]", row=6, col=1, color="white")
+    fig.update_xaxes(title_text="Time [hours]", row=n_rows, col=1, color="white")
     fig.update_yaxes(color="white")
 
     fig.show()
-
-    #return fig  # Return for interactive use; or use fig.show()
     

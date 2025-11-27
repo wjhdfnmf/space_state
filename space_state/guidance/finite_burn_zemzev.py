@@ -1,9 +1,9 @@
 # finite_burn_zemzev.py
 import numpy as np
 from scipy.integrate import solve_ivp
-from base.star_utils import days_to_seconds, sec_to_days, mps_to_apd, mps2_apd2
+from base.star_utils import day_to_sec, sec_to_days, mps_to_apd, mps2_apd2
 from base.star_config import CONFIG
-from base.star_dynamics import n_body_acceleration
+#from base.star_dynamics import n_body_acceleration
 
 AU = 149597870.7e3                          # m per AU
 
@@ -19,44 +19,44 @@ class FiniteBurnZEMZEV:
         self.last_t = -99999.0
         self.dir = np.array([0., 0., 1.])
 
-    def _primer_magnitude(self, Tgo_sec: float, m0: float) -> tuple[float, float]:
-        """Battin/D’Souza exact variable-mass primer (seconds·m/s) and remaining Δv (m/s)"""
-        ve = self.sc.total_isp * CONFIG.g0
-        a0 = self.sc.total_thrust / m0
-        if a0 <= 0 or Tgo_sec <= 0:
-            return 0.0, 0.0
-        τ = ve / a0
-        α = np.exp(Tgo_sec / τ)
-        if α > 1e20:                              # burn essentially finished
-            return Tgo_sec / 2.0, 0.0
-        lam_sec = τ * (α - 1.0 - np.log(α))        # exact primer magnitude
-        vgo = ve * np.log(α)
-        return lam_sec, vgo
+    # def _primer_magnitude(self, Tgo_sec: float, m0: float) -> tuple[float, float]:
+    #     """Battin/D’Souza exact variable-mass primer (seconds·m/s) and remaining Δv (m/s)"""
+    #     ve = self.sc.total_isp * CONFIG.g0
+    #     a0 = self.sc.total_thrust / m0
+    #     if a0 <= 0 or Tgo_sec <= 0:
+    #         return 0.0, 0.0
+    #     τ = ve / a0
+    #     α = np.exp(Tgo_sec / τ)
+    #     if α > 1e20:                              # burn essentially finished
+    #         return Tgo_sec / 2.0, 0.0
+    #     lam_sec = τ * (α - 1.0 - np.log(α))        # exact primer magnitude
+    #     vgo = ve * np.log(α)
+    #     return lam_sec, vgo
 
-    def _predict_powered(self, t0, r0, v0, m0, direction_unit, Tgo_days):
-        if Tgo_days <= 0:
-            return r0.copy(), v0.copy(), m0
+    # def _predict_powered(self, t0, r0, v0, m0, direction_unit, Tgo_days):
+    #     if Tgo_days <= 0:
+    #         return r0.copy(), v0.copy(), m0
 
-        ve = self.sc.total_isp * CONFIG.g0
-        F = self.sc.total_thrust
-        mdot = F / ve                                 # positive kg/s
+    #     ve = self.sc.total_isp * CONFIG.g0
+    #     F = self.sc.total_thrust
+    #     mdot = F / ve                                 # positive kg/s
 
-        def eom(t, y):
-            r, v, m = y[:3], y[3:6], y[6]
-            if m <= self.sc.dry_mass:
-                return np.concatenate([v, n_body_acceleration(t, y, self.bodies), [0.0]])
+    #     def eom(t, y):
+    #         r, v, m = y[:3], y[3:6], y[6]
+    #         if m <= self.sc.dry_mass:
+    #             return np.concatenate([v, n_body_acceleration(t, y, self.bodies), [0.0]])
 
-            a_grav = n_body_acceleration(t, y, self.bodies)
-            a_thrust_si = (F / m) * direction_unit                    # m/s²
-            a_thrust = mps2_apd2(a_thrust_si)                       # AU/day²
-            return np.concatenate([v, a_grav + a_thrust, [-mdot]])
+    #         a_grav = n_body_acceleration(t, y, self.bodies)
+    #         a_thrust_si = (F / m) * direction_unit                    # m/s²
+    #         a_thrust = mps2_apd2(a_thrust_si)                       # AU/day²
+    #         return np.concatenate([v, a_grav + a_thrust, [-mdot]])
 
-        sol = solve_ivp(eom, (t0, t0 + Tgo_days),
-                        np.hstack([r0, v0, m0]),
-                        method='DOP853', rtol=1e-12, atol=1e-12,
-                        max_step=30*sec_to_days(1))
-        yf = sol.y[:, -1]
-        return yf[:3], yf[3:6], yf[6]
+    #     sol = solve_ivp(eom, (t0, t0 + Tgo_days),
+    #                     np.hstack([r0, v0, m0]),
+    #                     method='DOP853', rtol=1e-12, atol=1e-12,
+    #                     max_step=30*sec_to_days(1))
+    #     yf = sol.y[:, -1]
+    #     return yf[:3], yf[3:6], yf[6]
 
     def update(self, t, y):
         return 0.0, np.array([1.0, 0.0, 0.0]), 0.0  # Placeholder for compatibility

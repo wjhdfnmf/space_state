@@ -1,4 +1,4 @@
-# star_structures.py
+# base/star_structures.py
 
 from typing import NamedTuple, Sequence, Dict, Any, List
 from dataclasses import dataclass, field
@@ -24,7 +24,6 @@ class ControllerCycle:
     vgo: float                      # Velocity To Go
     thrust_dir: Vector = field(default_factory=lambda: np.zeros(3))  # Thrust Direction Unit Vector
     throttle: float = 0.0           # Throttle Setting (0 to 1)
-    active: bool = False            # Guidance active or coasting
 
 # Specific ZEM/ZEV cycle
 @dataclass
@@ -47,7 +46,7 @@ class PropagationResult:
     Complete propagation result over one or more phases.
     Includes time, state vectors, guidance cycles, events, and conservation data.
     """
-    t: NDArray[np.float64] = field(default_factory=lambda: np.array([]))  # shape (N,) → time in days past epoch
+    t: NDArray[np.float64] = field(default_factory=lambda: np.array([]))  # shape (N,) → time in days past epoch [t0, t1, ..., tN]
     y: NDArray[np.float64] = field(default_factory=lambda: np.empty((7, 0)))  # shape (7, N) → [r_x, r_y, r_z, v_x, v_y, v_z, m]
     guidance: Sequence[GuidanceCycle] = field(default_factory=list)  # Guidance cycles during propagation
     events: List[dict[str, Any]] = field(default_factory=list)  # List of event dictionaries
@@ -60,6 +59,8 @@ class PropagationResult:
         self.clear()
         self.t = np.array([time])
         self.y = state.reshape(7, 1)
+
+        #self.describe_state() ###
 
     @property
     def state(self) -> NDArray[np.float64]:

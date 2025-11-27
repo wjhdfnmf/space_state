@@ -1,11 +1,11 @@
-# star_ship.py
+# base/star_ship.py
 import numpy as np
 from typing import List
 from dataclasses import dataclass
 
 from .star_logger import logger
 from .star_config import CONFIG
-from .star_utils import mps2_apd2, kgps_kgpd
+from .star_utils import mps2_apd2, kgps_kgpd, mps2_to_kps2
 
 
 class Thruster:
@@ -49,6 +49,11 @@ class Thruster:
             return 0.0
         return self._thrust / (self._velocity_exhaust)  # kg/s
     
+    @property
+    def _max_mdot(self) -> float:
+        """Maximum mass flow rate [kg/s] at full throttle."""
+        return self.__thrust_max / (self._velocity_exhaust)  # kg/s
+    
     def _set_throttle(self, level: float):
         """Set throttle level (0.0 to 1.0)."""
         self._throttle = np.clip(float(level), 0.0, 1.0)
@@ -64,15 +69,17 @@ class Spacecraft:
         self._name = name
         self._dry_mass = dry_mass                   # kg 
         self._propellant_mass = propellant_mass     # kg
-        self._thrusters = thrusters          
+        self._thrusters = thrusters     
+
+        self.dummy = False
         self._thrust_direction = np.array([0.0, 0.0, 1.0])  # Default aft
         self._initial_propellant = propellant_mass
 
-    @property
+    @property ###
     def dry_mass(self) -> float:
         return self._dry_mass
 
-    @property
+    @property ###
     def propellant_mass(self) -> float:
         return self._propellant_mass
     
@@ -80,8 +87,8 @@ class Spacecraft:
     def initial_propellant_mass(self) -> float:
         return self._initial_propellant
     
-    @property
-    def total_mass(self) -> float:
+    @property ###
+    def mass(self) -> float:
         return self.dry_mass + self.propellant_mass
 
     @property
@@ -95,12 +102,12 @@ class Spacecraft:
     @thrust_direction.setter
     def thrust_direction(self, direction: np.ndarray):
         norm = np.linalg.norm(direction)
-        if norm == 0:
-            raise ValueError("Thrust direction cannot be zero vector")
+        if norm == 0.0:
+            if not self.dummy: raise ValueError("Thrust direction cannot be zero vector")
         self._thrust_direction = direction / norm
 
     @property
-    def total_thrust(self) -> float:
+    def thrust(self) -> float:
         return sum(t._thrust for t in self.thrusters)
     
     @property
@@ -108,39 +115,83 @@ class Spacecraft:
         return sum(t._thrust_max for t in self.thrusters)
 
     @property
-    def total_isp(self) -> float:
+    def isp(self) -> float:
         # Weighted average by thrust
-        return sum(t._isp * t._thrust for t in self.thrusters) / self.total_thrust
+        if self.thrust == 0:
+            return 0.0
+        return sum(t._isp * t._thrust for t in self.thrusters) / self.thrust
+
+    @property
+    def max_isp(self) -> float:
+        # Weighted average by max thrust
+        return sum(t._isp * t._thrust_max for t in self.thrusters) / self.max_thrust
 
     @property ##
-    def total_mdot(self) -> float:
+    def mdot(self) -> float:
         if not self.active:
             return 0.0
-        return kgps_kgpd(sum(t._mdot for t in self.thrusters)) # kg/s
+        return sum(t._mdot for t in self.thrusters) # kg/s
     
     @property
-    def active(self) -> bool:
-        return self.total_thrust > 0 and self.propellant_mass > 0
+    def max_mdot(self) -> float:
+        return sum(t._max_mdot for t in self.thrusters)  # kg/s
+
+    @property
+    def mdot_kgpd(self) -> float:
+        """Mass flow rate in kg/day."""
+        return kgps_kgpd(self.mdot)
     
-    def set_throttle(self, level: float): ###
-        """Set throttle level (0.0 to 1.0) for all thrusters."""
+    @property
+    def ve(self) -> float: ###
+        # Weighted average by thrust
+        if self.thrust == 0:
+            return 0.0
+        return sum(t._velocity_exhaust * t._thrust for t in self.thrusters) / self.thrust
+    
+    @property
+    def max_ve(self) -> float:
+        # Weighted average by max thrust
+        return sum(t._velocity_exhaust * t._thrust_max for t in self.thrusters) / self.max_thrust
+
+    @property
+    def active(self) -> bool:
+        return self.thrust > 0 and self.propellant_mass > 0
+
+    @property
+    def throttle(self) -> float:
+        if not self.active:
+            return 0.0
+        # Assuming all thrusters have the same throttle level
+        return sum(t._throttle for t in self.thrusters) / len(self.thrusters) if self.thrusters else 0.0
+    
+    @throttle.setter
+    def throttle(self, level: float):
         if level < 0.0 or level > 1.0:
-            raise ValueError("Throttle level must be between 0.0 and 1.0")
+            if not self.dummy: raise ValueError("Throttle level must be between 0.0 and 1.0")
         for thruster in self.thrusters:
             thruster._set_throttle(level)
 
-    def get_thrust_vector(self) -> np.ndarray: ###
+    @property
+    def thrust_vector(self) -> np.ndarray: ###
         """Total thrust acceleration in AU/day²."""
         if not self.active:
             return np.zeros(3)
-        acc_m_s2 = self.total_thrust / self.total_mass  # N / kg = m/s²
+        acc_m_s2 = self.thrust / self.mass  # N / kg = m/s²
         return mps2_apd2(acc_m_s2) * self.thrust_direction # m/s² → AU/day²
     
-    def update_propellant(self, mass: float): ###
+    @property
+    def thrust_vector_km_s2(self) -> np.ndarray: ###
+        """Total thrust acceleration in km/s²."""
+        if not self.active:
+            return np.zeros(3)
+        acc_m_s2 = self.thrust / self.mass  # N / kg = m/s²
+        return mps2_to_kps2(acc_m_s2) * self.thrust_direction  # m/s² → km/s²
+    
+    def update_propellant(self, mass: float, bypass: bool = False): ###
         """Consume propellant over time interval dt_sec."""
         remaining = mass - self.dry_mass
-        if remaining < 0.0:
-            logger.warning(f"{self._name}: Propellant exhausted!")
+        #if remaining < 0.0:
+        #    if not self.dummy: logger.warning(f"Propellant mass exaused for {self._name}, setting to zero.")
         self._propellant_mass = max(0.0, remaining)
 
     def log(self):
@@ -148,9 +199,19 @@ class Spacecraft:
         logger.info(f"  Dry Mass: {self.dry_mass:.1f} kg")
         logger.info(f"  Propellant Mass: {self.propellant_mass:.1f} kg")
         logger.info(f"  Max Thrust: {self.max_thrust:.1f} N")
+        logger.info(f"  Max ISP: {self.max_isp:.1f} s")
     
     def __str__(self):
         return f"Spacecraft(name={self._name}, mass={self.total_mass:.1f} kg, thrust={self.max_thrust:.1f} N)"
+
+    def copy(self) -> 'Spacecraft':
+        return Spacecraft(
+            name=self._name,
+            dry_mass=self._dry_mass,
+            propellant_mass=self._propellant_mass,
+            thrusters=self._thrusters.copy()
+        )
+    
 # ————————————————————————
 # Real-world examples
 # aft thrusters only - perfect pointing assumed - unlimited throttle range

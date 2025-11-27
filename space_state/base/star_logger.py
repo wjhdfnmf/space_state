@@ -1,4 +1,4 @@
-# star_logger.py
+# base/star_logger.py
 import logging
 
 verbose = True

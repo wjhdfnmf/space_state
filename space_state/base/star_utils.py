@@ -1,4 +1,4 @@
-# star_utils.py
+# base/star_utils.py
 from astropy import units as u
 from astropy.time import Time
 import numpy as np
@@ -9,7 +9,7 @@ def sec_to_days(seconds: float) -> float:
     # Convert seconds to days
     return (seconds * u.second).to(u.day).value
 
-def days_to_seconds(days: float) -> float:
+def day_to_sec(days: float) -> float:
     # Convert days to seconds
     return (days * u.day).to(u.second).value
 
@@ -60,7 +60,11 @@ def apd2_mps2(au_per_day2: float) -> float:
 
 def mps2_apd2(m_per_s2: float) -> float:
     # Convert acceleration from m/s² to AU/day²
-    return (m_per_s2 * u.m / u.s**2).to(u.au / u.day**2).value 
+    return (m_per_s2 * u.m / u.s**2).to(u.au / u.day**2).value
+
+def mps2_to_kps2(m_per_s2: float) -> float:
+    # Convert acceleration from m/s² to km/s
+    return (m_per_s2 * u.m / u.s**2).to(u.km / u.s**2).value
 
 # Energy conversions
 def au2day2_mjkg(au2_day: float) -> float:
@@ -76,6 +80,47 @@ def body_position(BODY: dict, time: Time) -> np.ndarray:
 def body_velocity(BODY: dict, time: Time) -> np.ndarray:
     # Return the velocity of a celestial body at a given time
     return BODY['skyfield'].at(time).velocity.au_per_d
+
+# ----------------------------------------------
+# Convert SSB state to body-centered state
+def ssb_to_body_centered(time: Time, y_ssb: np.ndarray, BODY: dict) -> dict:
+    r_body_au = body_position(BODY, time)
+    v_body_au_d = body_velocity(BODY, time)
+    
+    r_rel_au = y_ssb[:3] - r_body_au
+    v_rel_aud = y_ssb[3:6] - v_body_au_d
+    
+    # Normalize
+    r_mag = np.linalg.norm(r_rel_au)
+    r_hat = r_rel_au / r_mag  # radial unit vector (body-centered X)
+    
+    # Angular momentum vector
+    h_vec = np.cross(r_rel_au, v_rel_aud)
+    h_mag = np.linalg.norm(h_vec)
+    if h_mag == 0:
+        h_hat = np.array([0.0, 0.0, 1.0])  # fallback
+    else:
+        h_hat = h_vec / h_mag  # orbit normal (Z)
+    
+    # Tangential unit vector (Y)
+    t_hat = np.cross(h_hat, r_hat)
+    t_hat /= np.linalg.norm(t_hat)
+    
+    # Body-centered basis vectors in SSB frame
+    R_bc_to_ssb = np.column_stack([r_hat, t_hat, h_hat])  # 3×3 rotation matrix
+    
+    # Inverse: SSB → body-centered
+    R_ssb_to_bc = R_bc_to_ssb.T
+    
+    return {
+        'r_au': r_rel_au,
+        'v_aud': v_rel_aud,
+        'r_km': au_to_km(r_rel_au),
+        'v_kms': apd_kps(v_rel_aud),
+        'y_km_kms': np.concatenate([au_to_km(r_rel_au), apd_kps(v_rel_aud), y_ssb[6:]]),
+        'R_bc_to_ssb': R_bc_to_ssb,   # ← THIS IS THE KEY
+        'R_ssb_to_bc': R_ssb_to_bc,
+    }
 
 
 ## ---- Orbital mechanics helper functions ---- ##

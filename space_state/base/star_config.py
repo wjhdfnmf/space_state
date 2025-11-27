@@ -1,4 +1,4 @@
-# star_config.py
+# base/star_config.py
 from typing import NamedTuple
 from astropy.time import Time
 
