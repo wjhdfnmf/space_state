@@ -47,12 +47,12 @@ class Thruster:
         """Mass flow rate [kg/s] at current throttle."""
         if self._throttle == 0.0:
             return 0.0
-        return self._thrust / (self._velocity_exhaust)  # kg/s
+        return self._thrust / (self._velocity_exhaust)  # kg/s # 100 is cheating
     
     @property
     def _max_mdot(self) -> float:
         """Maximum mass flow rate [kg/s] at full throttle."""
-        return self.__thrust_max / (self._velocity_exhaust)  # kg/s
+        return self.__thrust_max / (self._velocity_exhaust)  # kg/s # 100 is cheating
     
     def _set_throttle(self, level: float):
         """Set throttle level (0.0 to 1.0)."""

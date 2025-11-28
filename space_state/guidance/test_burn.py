@@ -9,6 +9,7 @@ import numpy as np
 
 from base.star_utils import sec_to_days, ssb_to_body_centered
 from base.star_constants import world_time
+from base.star_logger import logger
 from guidance.star_tools import estimate_burn_duration
 
 # ————————————————————————
@@ -49,7 +50,8 @@ class BurnController:
             self.ship.dry_mass,
             self.ship.max_thrust,
             self.ship.max_ve,
-            self.ship.max_mdot
+            self.ship.max_mdot,
+            verbose=True
         )
         
         # Set burn start and end times

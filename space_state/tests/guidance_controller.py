@@ -8,7 +8,7 @@ import numpy as np
 from base.star_utils import sec_to_days
 from base.star_propagator import Propagator
 from base.star_ship import starship_raptor_vac
-from base.star_states import get_circular_state_at_apoapsis, hohmann_setup, get_orbiting_state, get_hohmann_state_at_time
+from base.star_states import get_circular_state_at_apoapsis, hohmann_setup, get_orbiting_state, get_hohmann_state_at_time, moon_intercept
 from base.star_constants import BODIES
 from base.star_logger import logger
 from guidance.star_tools import estimate_burn_duration
@@ -24,7 +24,7 @@ def test_guided_insertion():
 
     ## ------------------------------------------------------
     ## Initial state in SSB frame (au, au/day, days)
-    r0, v0 = get_orbiting_state(body, 'leo_iss')
+    r0, v0 = get_orbiting_state(body, 'leo_200')
     y0 = np.concatenate([r0, v0, [ship.mass]])
     t0 = 0.0
 
@@ -36,32 +36,41 @@ def test_guided_insertion():
     prop.result.initialize(y0, 0.0)
 
     ## Determine transfer time (TODO: Intercept the Moon)
-    t1 = 0.2
-    tf = 2.0
+    intercept = moon_intercept(t0, y0, body, BODIES['moon'])
+    t1 = intercept['depart_t']
+
+    logger.info(f"Optimal departure time for Moon intercept: {t1} days, TOF: {intercept['TOF']} days, Distance: {intercept['distance']:.2f} km")
 
     ## ------------------------------------------------------
     ## Hohmann Transfer to GEO Apoapsis
-    target = get_hohmann_state_at_time(body, t0, y0, t1, 'geo')
+    target = get_hohmann_state_at_time(body, t0, y0, t1, 'tli_apo', verbose=True) ### RIGHT??? 
     guidance.set_target(target['delta_v_mps'], target['t_burn'])
+    logger.info(f"Hohmann transfer to GEO apoapsis burn at t={target['t_burn']} days, ΔV={target['delta_v_mps']} m/s")
+    logger.info(f"  r1 = {target['r1_km']} km, r2 = {target['r2_km']} km")
+    logger.info(f"  t_start = {guidance.t_start} days, t_end = {guidance.t_end} days")
 
-    prop.propagate(guidance.t_start)
-    prop.propagate(guidance.t_end, max_step=sec_to_days(2))
+    prop.propagate(guidance.t_start) # Propagate to burn start
+    prop.propagate(guidance.t_end, max_step=sec_to_days(2)) # Propagate to burn end
     
     ## ------------------------------------------------------
     ## Circularization at Apoapsis
 
-    # Setup guidance to target circular at apoapsis
+    #Setup guidance to target circular at apoapsis
     t = prop.result.time
     y = prop.result.state
     target = get_circular_state_at_apoapsis(body, t, y)
     guidance.set_target(target['delta_v_mps'], target['t_burn'])
+    logger.info(f"Circularization burn at t={target['t_burn']} days, ΔV={target['delta_v_mps']} m/s")
+    logger.info(f"  r_apo = {target['r_rel_km']} km")
+    logger.info(f"  t_apo = {target['t_apo']} days")
 
-    prop.propagate(guidance.t_start)
-    prop.propagate(guidance.t_end, max_step=sec_to_days(2))
+    prop.propagate(guidance.t_start) # Propagate to burn start
+    prop.propagate(guidance.t_end, max_step=sec_to_days(2)) # Propagate to burn end
 
     ## ------------------------------------------------------
     ## Finish propagation to final time
-    prop.propagate(tf)
+    prop.propagate(guidance.t_end + 4)
+    #prop.propagate(1.0)
 
     ## ------------------------------------------------------
     ## Validate final state

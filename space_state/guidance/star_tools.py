@@ -1,12 +1,8 @@
 # guidance/star_tools.py
 
 import numpy as np
-from scipy.integrate import solve_ivp
-from typing import Tuple
 
-from base.star_config import CONFIG
 from base.star_logger import logger
-from base.star_ship import Spacecraft
 
 # ————————————————————————
 # Time to Apoapsis Calculation
@@ -170,8 +166,5 @@ def estimate_burn_duration(
         return 0.0
 
     burn_time_sec = delta_m / max_mdot
-    logger.debug(f"Estimated burn time: {burn_time_sec:.2f} seconds")
+    if verbose: logger.debug(f"Estimated burn time: {burn_time_sec:.2f} seconds")
     return burn_time_sec
-
-def moon_intercept(self, t: float, y_ssb: np.ndarray):
-    pass

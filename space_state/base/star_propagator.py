@@ -17,13 +17,13 @@ class Propagator:
         self,
         ship: Spacecraft = None,
         guidance: object = None,
-        result: PropagationResult = PropagationResult(),
-        bodies: dict = CONFIG.all_bodies,
+        result: PropagationResult = None,
+        bodies: dict = None,
     ):
         self.ship = ship
         self.guidance = guidance
-        self.result = result
-        self.bodies = bodies
+        self.result = result if result is not None else PropagationResult()
+        self.bodies = bodies if bodies is not None else CONFIG.all_bodies
         
     #
     # DYNAMICS FUNCTION
@@ -96,6 +96,8 @@ class Propagator:
             atol: float = CONFIG.atol
         ) -> PropagationResult:
         """Propagate the spacecraft state over the given time span in days."""
+
+        #logger.debug(f"Propagating from t={self.result.time:.3f} days to t={t_end:.3f} days")
 
         sol = solve_ivp(
             fun=self.dynamics,

@@ -3,6 +3,8 @@
 import numpy as np
 from typing import Tuple
 from scipy.integrate import solve_ivp
+from tqdm import tqdm
+import time
 
 from .star_logger import logger
 from .star_config import CONFIG
@@ -11,6 +13,7 @@ from .star_propagator import Propagator
 from .star_utils import body_position, body_velocity, km_to_au, au_to_km, apd_kps, day_to_sec, apd_to_mps
 from .star_orbits import ALL_ORBITS
 from guidance.star_tools import time_to_apoapsis, get_apoapsis_state2
+import matplotlib.pyplot as plt
 
 from typing import Literal
 
@@ -113,13 +116,18 @@ def get_hohmann_state_at_time(
         y0: np.ndarray,
         t_target: float,
         target_orbit: OrbitName,
-        max_step: float = CONFIG.max_step
+        prop: Propagator = None,
+        max_step: float = CONFIG.max_step,
+        offset_km: float = 0.0,
+        verbose: bool = False,
     ) -> dict:
     """Return a new state along the current orbit that applies the Hohmann transfer at time t"""
     
     # Propagate to target time to get future state
-    prop = Propagator()
-    prop.result.initialize(y0, t0)
+    if prop is None:
+        prop = Propagator()
+        prop.result.initialize(y0, t0)
+    
     prop.propagate(t_target, max_step=max_step)
     y_target = prop.result.state
 
@@ -131,7 +139,7 @@ def get_hohmann_state_at_time(
 
     # Current and target orbit radii
     r1_au = np.linalg.norm(r_rel)     # Current orbit radius
-    r2_au = km_to_au(ALL_ORBITS[target_orbit].altitude_km) + BODY['radius']   # Target orbit radius
+    r2_au = km_to_au(ALL_ORBITS[target_orbit].altitude_km + offset_km) + BODY['radius']   # Target orbit radius
 
     # Compute ΔV to enter Hohmann transfer orbit (prograde)
     a_trans = (r1_au + r2_au) / 2 # Semi-major axis of transfer orbit
@@ -145,12 +153,14 @@ def get_hohmann_state_at_time(
     v_transfer = v_transfer_rel + earth_vel  # AU/day in SSB frame
     y_transfer = np.concatenate([y_target[:3], v_transfer, y_target[6:]])
 
-    # logger.debug(f"Hohmann Transfer Setup at t={t_target} days:")
-    # logger.debug(f" r1: {r1_au} AU   r2: {r2_au} AU")
-    # logger.debug(f" Δv1: {dv} AU/day")
-    # logger.debug(f" v_transfer: {v_transfer} AU/day")
-    # logger.debug(f" Transfer semi-major axis: {a_trans} AU")
-    # logger.debug(f" Transfer periapsis velocity: {v_trans_peri} AU/day")
+    if verbose:
+        logger.debug(f"Hohmann Transfer Setup at t={t_target} days:")
+        logger.debug(f" r1: {r1_au} AU   r2: {r2_au} AU")
+        logger.debug(f" r1_km: {au_to_km(r1_au)} km   r2_km: {au_to_km(r2_au)} km")
+        logger.debug(f" Δv1: {dv} AU/day")
+        logger.debug(f" v_transfer: {v_transfer} AU/day")
+        logger.debug(f" Transfer semi-major axis: {a_trans} AU")
+        logger.debug(f" Transfer periapsis velocity: {v_trans_peri} AU/day")
 
     # Return new target state
     return {
@@ -160,10 +170,13 @@ def get_hohmann_state_at_time(
         'y_transfer': y_transfer,
         'r1_au': r1_au,
         'r2_au': r2_au,
+        'r1_km': au_to_km(r1_au),
+        'r2_km': au_to_km(r2_au),
         'delta_v': dv,
         'delta_v_mps': apd_to_mps(dv),
         't_burn': t_target,
         't_apo': t_target,
+        'prop': prop,
     }
 
 
@@ -236,3 +249,79 @@ def escape_state_earth(BODY: dict, t: float, y0: np.ndarray) -> np.ndarray:
     v_new = v_dir * v_esc
     v = v_new + body_velocity(BODY, ts.tt_jd(epoch_jd + t))
     return np.concatenate([y0[:3], v, y0[6:]])
+
+# Moon Intercept Analysis for departure time optimization
+def moon_intercept(
+        t0: float,
+        y0: np.ndarray,
+        current_body: dict,
+        target_body: dict,
+        time_forward: float = 30,
+        grip_size: int = 1_000_000,
+        plot: bool = True,
+) -> dict:
+
+    distance_tracking = []
+
+    prop = Propagator()
+    prop.result.initialize(y0, 0.0)
+
+    logger.debug(f"Starting Moon intercept analysis...")
+    start_time = time.time()
+
+    for t in tqdm(np.linspace(t0, t0 + time_forward, grip_size), desc="Processing"):
+
+        target_1 = get_hohmann_state_at_time(current_body, t0, y0, t, 'tli_apo', prop=prop)
+        y = np.concatenate([target_1['r_target'], target_1['v_transfer'], [0.0]])
+        prop = target_1['prop']
+
+        target_2 = get_circular_state_at_apoapsis(current_body, t, y)
+
+        distance_vec = target_2['r'] - body_position(target_body, ts.tt_jd(epoch_jd + target_2['t_apo']))
+        distance = np.linalg.norm(distance_vec) - target_body['radius']
+        distance_km = au_to_km(distance)
+
+        distance_tracking.append((t, distance_km))
+
+        #logger.debug(f"Departure t={t:.10f} days: Distance to Moon at Apoapsis = {distance_km:.2f} km")
+    
+
+    # Final timing
+    exec_time_sec = time.time() - start_time
+    elapsed_min = exec_time_sec / 60
+    print(f"Elapsed: {elapsed_min:.2f} minutes")
+
+    # Extract for plotting
+    ts_departure, distances_km = zip(*distance_tracking)
+
+    # Summary stats
+    min_dist = min(distances_km)
+    min_idx = distances_km.index(min_dist)
+    t_closest = ts_departure[min_idx]
+
+    if plot:
+        plt.figure(figsize=(10, 6))
+        plt.plot(ts_departure, distances_km, 'o-', linewidth=2, markersize=4, color='blue')
+        plt.xlabel('Departure Time (days from t0)')
+        plt.ylabel('Distance to Moon at Apoapsis (km)')
+        plt.title('Departure Time vs Moon Intercept Distance')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('departure_vs_distance.png', dpi=300, bbox_inches='tight')  # Save plot
+        plt.show()  # Or display
+
+    # Flight statistics
+    target_1 = get_hohmann_state_at_time(current_body, t0, y0, t_closest, 'tli_apo')
+    y = np.concatenate([target_1['r_target'], target_1['v_transfer'], [0.0]])
+    target_2 = get_circular_state_at_apoapsis(current_body, t_closest, y)
+
+    TOF = target_2['t_apo'] - t_closest
+    delta_v = target_1['delta_v_mps'] + target_2['delta_v_mps']
+
+
+    return {
+        "depart_t": t_closest,
+        "distance":min_dist,
+        "TOF": TOF,
+        "delta_v": delta_v
+    }
