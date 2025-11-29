@@ -189,7 +189,8 @@ def time_to_apoapsis(r_vec, v_vec, mu, tol=1e-12):
 # ————————————————————————
 def get_apoapsis_state(r_vec, v_vec, mu) -> dict:
     """
-    Aapoapsis state for elliptical orbit (e < 1, ε < 0) relative to central body.
+    Apoapsis state for elliptical orbit (e < 1, ε < 0) relative to central body.
+    ASSUMPTIONS: Near periapsis
     Args:
         r_vec: Position vector(s) [AU] shape (3,)
         v_vec: Velocity vector(s) [AU/day] shape (3,)

@@ -22,7 +22,7 @@ ALL_BODIES = CONFIG.all_bodies
 # Initial State - SSB Frame (r, v, t)
 # ------------------------------------------------------------------
 
-#r0, v0 = get_orbiting_state(body, 'leo_iss') # SSB frame
+#r0, v0 = get_circular_state(body, 'leo_iss') # SSB frame
 r0, v0 = hohmann_setup(body, 'leo_iss', 'geo')  # SSB frame
 y0 = np.concatenate([r0, v0, [ship.mass]])
 t0 = 0.0 # days

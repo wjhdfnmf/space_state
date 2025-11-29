@@ -5,7 +5,7 @@ import numpy as np
 from base.star_constants import epoch_jd, ts, BODIES
 from base.star_utils import body_position, au_to_km, sec_to_days
 from base.star_ship import starship_raptor_vac
-from base.star_states import get_circular_state_at_apoapsis, get_hohmann_state_at_time, get_orbiting_state
+from base.star_states import get_circular_state_at_apoapsis, get_hohmann_state_at_time, get_circular_state
 from base.star_logger import logger
 from guidance.star_tools import estimate_burn_duration
 from base.star_propagator import Propagator
