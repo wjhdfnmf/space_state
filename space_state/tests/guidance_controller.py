@@ -5,7 +5,7 @@ Unit test for FiniteBurnZEMZEV_V2 guidance controller.
 
 import numpy as np
 
-from base.star_utils import sec_to_days
+from base.star_utils import sec_to_days, apd_to_mps
 from base.star_propagator import Propagator
 from base.star_ship import starship_raptor_vac
 from base.star_states import get_circular_state_at_apoapsis, hohmann_setup, get_orbiting_state, get_hohmann_state_at_time, moon_intercept
@@ -36,14 +36,20 @@ def test_guided_insertion():
     prop.result.initialize(y0, 0.0)
 
     ## Determine transfer time (TODO: Intercept the Moon)
-    intercept = moon_intercept(t0, y0, body, BODIES['moon'])
-    t1 = intercept['depart_t']
+    #intercept = moon_intercept(t0, y0, body, BODIES['moon'])
+    #t1 = intercept['depart_t']
 
-    logger.info(f"Optimal departure time for Moon intercept: {t1} days, TOF: {intercept['TOF']} days, Distance: {intercept['distance']:.2f} km")
+    #logger.info(f"Optimal departure time for Moon intercept: {t1} days, TOF: {intercept['TOF']} days, Distance: {intercept['distance']:.2f} km")
+    t1 = 0.3
 
     ## ------------------------------------------------------
     ## Hohmann Transfer to GEO Apoapsis
-    target = get_hohmann_state_at_time(body, t0, y0, t1, 'tli_apo', verbose=True) ### RIGHT??? 
+    #target = get_hohmann_state_at_time(body, t0, y0, t1, 'geo', target_body=BODIES['moon'], verbose=True)
+    target = get_hohmann_state_at_time(body, t0, y0, t1, 'geo', verbose=True)
+
+    #logger.debug(f" Inclination adjustment {apd_to_mps(target_r['v_transfer_rel'] - target['v_transfer_rel'])} m/s")
+    #logger.debug(f" Inclination adjustment {apd_to_mps(np.linalg.norm(target_r['v_transfer_rel'] - target['v_transfer_rel']))} m/s")
+
     guidance.set_target(target['delta_v_mps'], target['t_burn'])
     logger.info(f"Hohmann transfer to GEO apoapsis burn at t={target['t_burn']} days, ΔV={target['delta_v_mps']} m/s")
     logger.info(f"  r1 = {target['r1_km']} km, r2 = {target['r2_km']} km")
@@ -69,7 +75,7 @@ def test_guided_insertion():
 
     ## ------------------------------------------------------
     ## Finish propagation to final time
-    prop.propagate(guidance.t_end + 4)
+    prop.propagate(guidance.t_end + 1)
     #prop.propagate(1.0)
 
     ## ------------------------------------------------------

@@ -6,6 +6,7 @@ Test Burn Guidance Controller
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 from base.star_utils import sec_to_days, ssb_to_body_centered
 from base.star_constants import world_time
@@ -27,11 +28,12 @@ class BurnController:
         self.accelerate = True
         self.t_start = 0.0
         self.t_end = 0.0
+        self.thrust_dir = np.zeros(3)
 
     #
     # Set Target
     #
-    def set_target(self, delta_v: float, target_time: float):
+    def set_target(self, delta_v: float, target_time: float, thrust_dir = np.zeros(3)):
 
         if delta_v == 0:
             raise ValueError("Delta-V cannot be zero for BurnController.")
@@ -46,11 +48,7 @@ class BurnController:
         # Estimate burn duration
         burn_time_sec = estimate_burn_duration(
             delta_v,
-            self.ship.propellant_mass,
-            self.ship.dry_mass,
-            self.ship.max_thrust,
-            self.ship.max_ve,
-            self.ship.max_mdot,
+            self.ship,
             verbose=True
         )
         
@@ -58,6 +56,11 @@ class BurnController:
         duration = sec_to_days(burn_time_sec)
         self.t_start = target_time - duration / 2
         self.t_end = self.t_start + duration
+
+        if np.linalg.norm(thrust_dir) > 0:
+            self.thrust_dir = thrust_dir / np.linalg.norm(thrust_dir)
+        else:
+            self.thrust_dir = np.zeros(3)
 
     
     #
@@ -78,7 +81,11 @@ class BurnController:
         
         state = ssb_to_body_centered(world_time(t), y_ssb, self.central_body)
         thrust_dir = state['v_kms'] / np.linalg.norm(state['v_kms'])
+
+        if np.linalg.norm(self.thrust_dir) > 0:
+            thrust_dir = self.thrust_dir
+
         if not self.accelerate:
             thrust_dir = -thrust_dir  # Decelerate
-        
+
         return 1.0, thrust_dir, 1.0

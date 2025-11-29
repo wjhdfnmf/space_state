@@ -3,6 +3,7 @@
 import numpy as np
 from typing import Tuple
 from scipy.integrate import solve_ivp
+from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 import time
 
@@ -110,6 +111,8 @@ def get_circular_state_at_apoapsis(BODY, t: float, y0: np.ndarray) -> dict:
     }
 
 
+
+
 def get_hohmann_state_at_time(
         BODY,
         t0: float,
@@ -120,6 +123,7 @@ def get_hohmann_state_at_time(
         max_step: float = CONFIG.max_step,
         offset_km: float = 0.0,
         verbose: bool = False,
+        target_body: dict = None,
     ) -> dict:
     """Return a new state along the current orbit that applies the Hohmann transfer at time t"""
     
@@ -150,17 +154,68 @@ def get_hohmann_state_at_time(
     # Apply Δv1 in current velocity direction
     v_dir_rel = v_rel / np.linalg.norm(v_rel)
     v_transfer_rel = v_rel + dv * v_dir_rel
+
+    # Account for target inclination
+    if target_body is not None:
+        t_apo = t_target + time_to_apoapsis(r_rel, v_transfer_rel, BODY['mu'])
+
+        body_apo_pos = body_position(BODY, ts.tt_jd(epoch_jd + t_apo))
+        body_apo_vel = body_velocity(BODY, ts.tt_jd(epoch_jd + t_apo))
+        target_apo_pos = body_position(target_body, ts.tt_jd(epoch_jd + t_apo))
+        target_apo_vel = body_velocity(target_body, ts.tt_jd(epoch_jd + t_apo))
+
+        r_target_rel = target_apo_pos - body_apo_pos
+        v_target_rel = target_apo_vel - body_apo_vel
+        h_target = np.cross(r_target_rel, v_target_rel)
+        h_target_norm = h_target / np.linalg.norm(h_target)
+
+        h_sc = np.cross(r_rel, v_transfer_rel)
+        h_sc_norm = h_sc / np.linalg.norm(h_sc)
+
+        cos_i = abs(np.dot(h_sc_norm, h_target_norm))
+        i_diff_rad = np.arccos(np.clip(cos_i, -1.0, 1.0))
+        i_diff_deg = np.degrees(i_diff_rad)
+
+        v_transfer_original = v_transfer_rel.copy()
+        if i_diff_deg > 1e-6:
+            rot = R.align_vectors([h_target_norm], [h_sc_norm])[0]  # Returns rotation matrix
+            # Apply to direction only
+            v_dir = v_transfer_rel / np.linalg.norm(v_transfer_rel)
+            v_dir_adj = rot.apply(v_dir)
+            v_transfer_rel = np.linalg.norm(v_transfer_original) * v_dir_adj
+
+            # Verify adjusted inclination
+            h_sc_adj  = np.cross(r_rel, v_transfer_rel)
+            h_sc_adj_norm = h_sc_adj / np.linalg.norm(h_sc_adj)
+            cos_i_adj = abs(np.dot(h_sc_adj_norm, h_target_norm))
+            i_adj_rad = np.arccos(np.clip(cos_i_adj, -1.0, 1.0))
+            i_adj_deg = np.degrees(i_adj_rad)
+
+            dv_normal = np.linalg.norm(v_transfer_rel - v_transfer_original)
+            dv_normal_mps = apd_to_mps(dv_normal)
+            dv += dv_normal  # Adjust delta-v for inclination change
+
+            logger.debug(f" Initial inclination difference: {i_diff_deg:.6f} deg")
+            logger.debug(f" Adjusted inclination difference: {i_adj_deg:.6f} deg")
+            logger.debug(f" Normal Δv for inclination change: {dv_normal_mps:.2f} m/s")
+        else:
+            v_dir_adj = np.zeros(3)
+            dv_normal_mps = 0.0
+            i_adj_deg = 0.0
+    else:
+        v_dir_adj = np.zeros(3)
+        dv_normal_mps = 0.0
+        i_adj_deg = 0.0
+
+    # Final transfer state in SSB frame
     v_transfer = v_transfer_rel + earth_vel  # AU/day in SSB frame
     y_transfer = np.concatenate([y_target[:3], v_transfer, y_target[6:]])
 
     if verbose:
         logger.debug(f"Hohmann Transfer Setup at t={t_target} days:")
-        logger.debug(f" r1: {r1_au} AU   r2: {r2_au} AU")
         logger.debug(f" r1_km: {au_to_km(r1_au)} km   r2_km: {au_to_km(r2_au)} km")
-        logger.debug(f" Δv1: {dv} AU/day")
+        logger.debug(f" Δv1: {apd_to_mps(dv)} m/s")
         logger.debug(f" v_transfer: {v_transfer} AU/day")
-        logger.debug(f" Transfer semi-major axis: {a_trans} AU")
-        logger.debug(f" Transfer periapsis velocity: {v_trans_peri} AU/day")
 
     # Return new target state
     return {
@@ -177,6 +232,10 @@ def get_hohmann_state_at_time(
         't_burn': t_target,
         't_apo': t_target,
         'prop': prop,
+        'v_direction': v_dir_adj,
+        'v_transfer_rel': v_transfer_rel,
+        'dv_normal_mps': dv_normal_mps,
+        'inclination_adjusted_deg': i_adj_deg,
     }
 
 
@@ -226,8 +285,6 @@ def hohmann_setup(BODY, orbit_p: OrbitName, orbit_a: OrbitName = None, t0: float
     logger.debug(f" Transfer periapsis velocity (AU/day): {v_trans_peri:.6f}")
     logger.debug(f" Circular LEO velocity (AU/day): {v_circ_leo:.6f}")
 
-
-
     return {
         'r0': r0,
         'v_transfer': v_transfer,
@@ -256,8 +313,8 @@ def moon_intercept(
         y0: np.ndarray,
         current_body: dict,
         target_body: dict,
-        time_forward: float = 30,
-        grip_size: int = 1_000_000,
+        time_forward: float = 0.1,
+        grip_size: int = 1_000,
         plot: bool = True,
 ) -> dict:
 
@@ -269,9 +326,10 @@ def moon_intercept(
     logger.debug(f"Starting Moon intercept analysis...")
     start_time = time.time()
 
-    for t in tqdm(np.linspace(t0, t0 + time_forward, grip_size), desc="Processing"):
+    #for t in np.linspace(t0, t0 + time_forward, grip_size):
+    for t in tqdm(np.linspace(t0, t0 + time_forward, grip_size), desc="Processing", unit="steps"):
 
-        target_1 = get_hohmann_state_at_time(current_body, t0, y0, t, 'tli_apo', prop=prop)
+        target_1 = get_hohmann_state_at_time(current_body, t0, y0, t, 'tli_apo', target_body=target_body, prop=prop)
         y = np.concatenate([target_1['r_target'], target_1['v_transfer'], [0.0]])
         prop = target_1['prop']
 
@@ -308,16 +366,19 @@ def moon_intercept(
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig('departure_vs_distance.png', dpi=300, bbox_inches='tight')  # Save plot
-        plt.show()  # Or display
+        plt.show(block=False)  # Or display
+        plt.pause(0.1)
 
     # Flight statistics
-    target_1 = get_hohmann_state_at_time(current_body, t0, y0, t_closest, 'tli_apo')
+    target_1 = get_hohmann_state_at_time(current_body, t0, y0, t_closest, 'tli_apo', target_body=target_body)
     y = np.concatenate([target_1['r_target'], target_1['v_transfer'], [0.0]])
     target_2 = get_circular_state_at_apoapsis(current_body, t_closest, y)
+    distance_vec = target_2['r'] - body_position(target_body, ts.tt_jd(epoch_jd + target_2['t_apo']))
 
     TOF = target_2['t_apo'] - t_closest
     delta_v = target_1['delta_v_mps'] + target_2['delta_v_mps']
 
+    logger.debug(f" Distance to Moon at closest approach: {distance_vec} AU ({au_to_km(np.linalg.norm(distance_vec)):.2f} km)")
 
     return {
         "depart_t": t_closest,

@@ -1,0 +1,75 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{Orbital Mechanics Formulas Overview}
+\author{Reference from Simulation Codebase}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Angular Momentum}
+The specific angular momentum vector is given by
+\begin{equation}
+\mathbf{h} = \mathbf{r} \times \mathbf{v},
+\end{equation}
+with magnitude $h = \|\mathbf{h}\|$. Units: AU$^2$/day.
+
+\section{Eccentricity Vector}
+The eccentricity vector and magnitude are
+\begin{align}
+\mathbf{e} &= \frac{1}{\mu} (\mathbf{v} \times \mathbf{h}) - \hat{\mathbf{r}}, e &= \|\mathbf{e}\|,
+\end{align}
+where $\hat{\mathbf{r}} = \mathbf{r} / r$ and $r = \|\mathbf{r}\|$. $e < 1$ (elliptical), $e = 1$ (parabolic), $e > 1$ (hyperbolic).
+
+\section{Inclination}
+The inclination $i$ (relative to equatorial plane, z-hat = [0,0,1]) is
+\begin{equation}
+i = \arccos \left( \left| \frac{h_z}{h} \right| \right),
+\end{equation}
+with $h_z = \mathbf{h} \cdot \hat{\mathbf{z}}$. Signed: $\operatorname{sign}(h_z) \cdot i$. Range: $0^\circ$ to $180^\circ$.
+
+\section{Specific Energy}
+The specific orbital energy is
+\begin{equation}
+\varepsilon = \frac{v^2}{2} - \frac{\mu}{r},
+\end{equation}
+with $v = \|\mathbf{v}\|$. $\varepsilon < 0$ (bound), $=0$ (parabolic), $>0$ (unbound).
+
+\section{Semi-Major Axis}
+For elliptical orbits ($\varepsilon < 0$),
+\begin{equation}
+a = -\frac{\mu}{2 \varepsilon}.
+\end{equation}
+For hyperbolic ($\varepsilon > 0$), $a < 0$ (magnitude only).
+
+True anomaly $\nu$:
+\begin{equation}
+\cos \nu = \frac{\mathbf{e} \cdot \mathbf{r}}{e r}, \quad \nu = \arccos(\cos \nu).
+\end{equation}
+If $v_r < 0$, use $2\pi - \nu$.{equation}
+If
+
+Eccentric anomaly $E$:
+\begin{equation}
+E = 2 \arctan \left( \frac{\sqrt{1 - e} \sin(\nu/2)}{\sqrt{1 + e} \cos(\nu/2)} \right).
+\end{equation}
+Mean anomaly $M = E - e \sin E$; time to apoapsis ($M_{apo} = \pi$):
+\begin{equation}
+\Delta M = \pi - M, \quad t_{apo} = \frac{\Delta M}{n}, \quad n = \sqrt{\frac{\mu}{a^3}}.
+\end{equation}
+Parabolic/hyperbolic: $\infty$.
+
+\section{Apoapsis State}
+Radius: $r_{apo} = a (1 + e)$. Position: $\mathbf{r}_{apo} = \hat{\mathbf{r}} \cdot r_{apo}$. Velocity magnitude:
+\begin{equation}
+v_{apo} = \sqrt{\frac{\mu (1 - e)}{a (1 + e)}}.
+\end{equation}
+Vector: $\mathbf{v}_{apo} = \hat{\mathbf{h}} \times \mathbf{r}_{apo} \cdot v_{apo} / \|\hat{\mathbf{h}} \times \mathbf{r}_{apo}\|$, with $\hat{\mathbf{h}} = \mathbf{h} / h$.
+
+\end{document}

@@ -82,11 +82,7 @@ def moon_intercept(
 
     #         burn_time_sec = estimate_burn_duration(
     #             target_2['delta_v_mps'],
-    #             ship.propellant_mass,
-    #             ship.dry_mass,
-    #             ship.max_thrust,
-    #             ship.max_ve,
-    #             ship.max_mdot
+    #             ship,
     #         )
 
     #         burn_time = sec_to_days(burn_time_sec)

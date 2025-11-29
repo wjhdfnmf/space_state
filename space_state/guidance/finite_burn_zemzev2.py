@@ -151,11 +151,7 @@ class FiniteBurnZEMZEV_V2:
         # Initial burn timing estimate
         burn_time_sec = estimate_burn_duration(
             self.last_vgo,
-            self.ship.propellant_mass,
-            self.ship.dry_mass,
-            self.ship.max_thrust,
-            self.ship.max_ve,
-            self.ship.max_mdot,
+            self.ship,
             verbose=False
         )
         half_burn_days = sec_to_days(burn_time_sec / 2.0)
@@ -222,11 +218,7 @@ class FiniteBurnZEMZEV_V2:
             self.last_horizon_update = t
             remaining_sec = estimate_burn_duration(
                 self.last_vgo,
-                self.ship.propellant_mass,
-                self.ship.dry_mass,
-                self.ship.max_thrust,
-                self.ship.max_ve,
-                self.ship.max_mdot,
+                self.ship,
                 verbose=False
             )
             if remaining_sec < 1e6:
@@ -260,11 +252,7 @@ class FiniteBurnZEMZEV_V2:
 
         burn_time_sec = estimate_burn_duration(
             self.last_vgo,
-            self.ship.propellant_mass,
-            self.ship.dry_mass,
-            self.ship.max_thrust,
-            self.ship.max_ve,
-            self.ship.max_mdot,
+            self.ship,
             verbose=False
         )
 

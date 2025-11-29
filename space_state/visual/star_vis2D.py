@@ -72,6 +72,10 @@ def plot_orbital_metrics(
     v2 = np.sum(v_rel_au_day**2, axis=1)
     r_norm = np.linalg.norm(dr_earth, axis=1) + 1e-20
 
+    # Orbital inclination
+    incl_rad = np.arccos(np.clip(h_vec[:, 2] / (h + 1e-20), -1, 1))  # Avoid div0
+    incl_deg = np.degrees(incl_rad)  # [0, 180]°; Earth equatorial frame
+
     mu = BODIES['earth']['mu']  # AU³/day²
 
     energy = 0.5 * v2 - mu / r_norm     # Specific orbital energy (AU²/day²)
@@ -126,6 +130,15 @@ def plot_orbital_metrics(
             'lines': [
                 {'name': "Eccentricity", 'y': e, 'line': dict(color="#FF69B4")},
             ],
+            'enabled': True,
+        },
+        'inclination': {
+            'title': "Inclination [deg]",
+            'yaxis_title': "Inclination [°]",
+            'lines': [
+                {'name': "Inclination", 'y': incl_deg, 'line': dict(color="#9932CC")}
+            ],
+            'range': [0, 180],
             'enabled': True,
         },
         'apo_periapsis': {
