@@ -45,7 +45,7 @@ def test_guided_insertion():
     ## Hohmann Transfer to GEO Apoapsis
     target = get_hohmann_state_at_time(body, t0, y0, t1, 'tli_apo')
     guidance.set_target(target['delta_v_mps'], target['t_target'])
-    logger.info(f"Hohmann transfer to GEO apoapsis burn at t={target['t_target']} days, ΔV={target['delta_v_mps']} m/s")
+    logger.info(f"Hohmann transfer burn at t={target['t_target']} days, ΔV={target['delta_v_mps']} m/s")
     logger.info(f"  r1 = {target['r1_km']} km, r2 = {target['r2_km']} km")
     logger.info(f"  t_start = {guidance.t_start} days, t_end = {guidance.t_end} days")
 
@@ -56,9 +56,7 @@ def test_guided_insertion():
     ## Circularization at Apoapsis
 
     #Setup guidance to target circular at apoapsis
-    t = prop.result.time
-    y = prop.result.state
-    target = get_circular_state_at_apoapsis(body, t, y)
+    target = get_circular_state_at_apoapsis(body, prop.result.time, prop.result.state)
     guidance.set_target(target['delta_v_mps'], target['t_apo'])
     logger.info(f"Circularization burn at t={target['t_apo']} days, ΔV={target['delta_v_mps']} m/s")
     logger.info(f"  r_apo = {target['r_rel_km']} km")

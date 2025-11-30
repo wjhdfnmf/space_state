@@ -279,7 +279,7 @@ def moon_intercept(
         target_body: dict,
         time_forward: float = 0.1,
         grip_size: int = 1_000,
-        plot: bool = True,
+        plot: bool = False,
 ) -> dict:
 
     distance_tracking = []
@@ -293,7 +293,7 @@ def moon_intercept(
     #for t in np.linspace(t0, t0 + time_forward, grip_size):
     for t in tqdm(np.linspace(t0, t0 + time_forward, grip_size), desc="Processing", unit="steps"):
 
-        target_1 = get_hohmann_state_at_time(current_body, t0, y0, t, 'tli_apo', target_body=target_body, prop=prop)
+        target_1 = get_hohmann_state_at_time(current_body, t0, y0, t, 'tli_apo', prop=prop)
         y = np.concatenate([target_1['r_target'], target_1['v_transfer'], [0.0]])
         prop = target_1['prop']
 
@@ -334,15 +334,13 @@ def moon_intercept(
         plt.pause(0.1)
 
     # Flight statistics
-    target_1 = get_hohmann_state_at_time(current_body, t0, y0, t_closest, 'tli_apo', target_body=target_body)
+    target_1 = get_hohmann_state_at_time(current_body, t0, y0, t_closest, 'tli_apo')
     y = np.concatenate([target_1['r_target'], target_1['v_transfer'], [0.0]])
     target_2 = get_circular_state_at_apoapsis(current_body, t_closest, y)
     distance_vec = target_2['r'] - body_position(target_body, ts.tt_jd(epoch_jd + target_2['t_apo']))
 
     TOF = target_2['t_apo'] - t_closest
     delta_v = target_1['delta_v_mps'] + target_2['delta_v_mps']
-
-    logger.debug(f" Distance to Moon at closest approach: {distance_vec} AU ({au_to_km(np.linalg.norm(distance_vec)):.2f} km)")
 
     return {
         "depart_t": t_closest,

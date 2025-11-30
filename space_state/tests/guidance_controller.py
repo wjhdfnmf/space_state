@@ -26,8 +26,8 @@ def test_guided_insertion():
     ## Initial state in SSB frame (au, au/day, days)
     r0, v0 = get_circular_state(body, 'leo_200')
     y0 = np.concatenate([r0, v0, [ship.mass]])
-    t0 = 0.0
-
+    t0 = 0.0                  # Initial time
+    tf = 10.0                 # Final time delta
     ship.log()
 
     # Setup Propagator and Guidance
@@ -36,17 +36,16 @@ def test_guided_insertion():
     prop.result.initialize(y0, 0.0)
 
     ## Determine transfer time (TODO: Intercept the Moon)
-    intercept = moon_intercept(t0, y0, body, BODIES['moon'])
+    intercept = moon_intercept(t0, y0, body, BODIES['moon'], plot=False)
+    logger.info(f"Optimal departure time for Moon intercept: {intercept['depart_t']} days, TOF: {intercept['TOF']} days, Distance: {intercept['distance']:.2f} km")
     t1 = intercept['depart_t']
-
-    #logger.info(f"Optimal departure time for Moon intercept: {t1} days, TOF: {intercept['TOF']} days, Distance: {intercept['distance']:.2f} km")
     #t1 = 0.3
 
     ## ------------------------------------------------------
     ## Hohmann Transfer to GEO Apoapsis
-    target = get_hohmann_state_at_time(body, t0, y0, t1, 'geo')
-
+    target = get_hohmann_state_at_time(body, t0, y0, t1, 'tli_apo')
     guidance.set_target(target['delta_v_mps'], target['t_target'])
+
     logger.info(f"Hohmann transfer to GEO apoapsis burn at t={target['t_target']} days, ΔV={target['delta_v_mps']} m/s")
     logger.info(f"  r1 = {target['r1_km']} km, r2 = {target['r2_km']} km")
     logger.info(f"  t_start = {guidance.t_start} days, t_end = {guidance.t_end} days")
@@ -56,12 +55,11 @@ def test_guided_insertion():
     
     ## ------------------------------------------------------
     ## Circularization at Apoapsis
-
-    #Setup guidance to target circular at apoapsis
     t = prop.result.time
     y = prop.result.state
     target = get_circular_state_at_apoapsis(body, t, y)
     guidance.set_target(target['delta_v_mps'], target['t_apo'])
+
     logger.info(f"Circularization burn at t={target['t_apo']} days, ΔV={target['delta_v_mps']} m/s")
 
     prop.propagate(guidance.t_start) # Propagate to burn start
@@ -69,7 +67,7 @@ def test_guided_insertion():
 
     ## ------------------------------------------------------
     ## Finish propagation to final time
-    prop.propagate(guidance.t_end + 1)
+    prop.propagate(guidance.t_end + tf)
     #prop.propagate(1.0)
 
     ## ------------------------------------------------------

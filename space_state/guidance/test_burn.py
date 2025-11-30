@@ -51,6 +51,8 @@ class BurnController:
             self.ship,
             verbose=True
         )
+
+        logger.info(f"Estimated burn duration: {burn_time_sec:.2f} seconds.")
         
         # Set burn start and end times
         duration = sec_to_days(burn_time_sec)

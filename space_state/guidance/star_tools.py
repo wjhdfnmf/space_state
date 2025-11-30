@@ -73,7 +73,7 @@ def eccentricity(r_vec, v_vec, mu, axis: int = 0) -> dict:
         h_vec = np.cross(r_vec, v_vec)                      # Angular momentum
         r = np.linalg.norm(r_vec)                     
         e_vec = np.cross(v_vec, h_vec) / mu - r_vec / r     # Eccentricity
-        e = np.linalg.norm(e_vec)
+        e_mag = np.linalg.norm(e_vec)
 
     return {
         'e_vec': e_vec,
@@ -145,9 +145,9 @@ def time_to_apoapsis(r_vec, v_vec, mu, tol=1e-12):
     Units: r [AU], v [AU/day], mu [AU³/day²]
     """
     # Eccentricity vector and magnitude
-    eccentricity = eccentricity(r_vec, v_vec, mu)
-    e_vec = eccentricity['e_vec']
-    e = eccentricity['e_mag']
+    e_data = eccentricity(r_vec, v_vec, mu)
+    e_vec = e_data['e_vec']
+    e = e_data['e_mag']
 
     if e < 1.0 - tol:                              # Elliptical (bound)
         energy = specific_energy(r_vec, v_vec, mu)
@@ -203,8 +203,8 @@ def get_apoapsis_state(r_vec, v_vec, mu) -> dict:
         raise ValueError("Unbound orbit (ε ≥ 0); no apoapsis")
     
     a = semi_major_axis(r_vec, v_vec, mu)
-    eccentricity = eccentricity(r_vec, v_vec, mu)
-    e = eccentricity['e_mag']
+    e_data = eccentricity(r_vec, v_vec, mu)
+    e = e_data['e_mag']
     
     if e >= 1.0:
         raise ValueError("Eccentricity ≥ 1; no apoapsis")
