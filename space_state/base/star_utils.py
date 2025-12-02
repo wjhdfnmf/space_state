@@ -3,6 +3,8 @@ from astropy import units as u
 from astropy.time import Time
 import numpy as np
 
+from .star_structures import ControllerCycle
+
 ## ---- Unit conversion functions ---- ##
 # Time conversions
 def sec_to_days(seconds: float) -> float:
@@ -12,6 +14,10 @@ def sec_to_days(seconds: float) -> float:
 def day_to_sec(days: float) -> float:
     # Convert days to seconds
     return (days * u.day).to(u.second).value
+
+def min_to_days(minutes: float) -> float:
+    # Convert minutes to days
+    return (minutes * u.minute).to(u.day).value
 
 # Body conversions
 def mean_radius_km(radii: np.ndarray) -> float:
@@ -132,3 +138,32 @@ def calculate_eccentricity(r_vec: np.ndarray, v_vec: np.ndarray, mu: float) -> f
     h = np.linalg.norm(h_vec)
     e_vec = (np.cross(v_vec, h_vec) / mu) - (r_vec / r)
     return np.linalg.norm(e_vec)
+
+
+#
+# LOG GUIDANCE CYCLES
+#
+def log_guidance(sol: object, guidance, result):
+    # Log guidance cycles
+    if guidance is not None:
+        for i in range(len(sol.t)):
+            t_i = sol.t[i]
+            y_i = sol.y[:, i]
+            vgo, thrust_dir, throttle = guidance.update(t_i, y_i)
+
+            result.log_cycle(t_i, ControllerCycle(
+                vgo=vgo,
+                thrust_dir=thrust_dir,
+                throttle=throttle,
+            ))
+    # No guidance - default to zero thrust
+    else:
+        for i in range(len(sol.t)):
+            t_i = sol.t[i]
+            result.log_cycle(t_i, ControllerCycle(
+                vgo=0.0,
+                thrust_dir=np.array([0.0, 0.0, 0.0]),
+                throttle=0.0,
+            ))
+    
+    

@@ -33,7 +33,15 @@ class BurnController:
     #
     # Set Target
     #
-    def set_target(self, delta_v: float, target_time: float, thrust_dir = np.zeros(3)):
+    def set_target(self, target: dict):
+
+        # Extract target parameters
+
+        delta_v = target['delta_v']
+        target_time = target['t_center']
+        thrust_dir = target.get('dir', np.zeros(3))
+
+        # Validate inputs
 
         if delta_v == 0:
             raise ValueError("Delta-V cannot be zero for BurnController.")
@@ -69,8 +77,8 @@ class BurnController:
     # Check if the burn is currently active
     #
     def active(self, t: float) -> bool:
-        if self.t_end == 0.0:
-            raise ValueError("BurnController: Burn time not set. Call set_target() first.")
+        #if self.t_end == 0.0:
+        #    raise ValueError("BurnController: Burn time not set. Call set_target() first.")
         # Active when t in [t_start, t_end]
         return self.t_start <= t < self.t_end
 
@@ -81,6 +89,7 @@ class BurnController:
         if not self.active(t):
             return 0.0, np.array([0.0, 0.0, 1.0]), 0.0  # No thrust
         
+        # Compute thrust direction in SSB frame based on current velocity
         state = ssb_to_body_centered(world_time(t), y_ssb, self.central_body)
         thrust_dir = state['v_kms'] / np.linalg.norm(state['v_kms'])
 

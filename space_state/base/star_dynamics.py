@@ -21,3 +21,21 @@ def n_body_acceleration(t: float, y: np.ndarray, bodies: Sequence[str]) -> np.nd
         accel += -GM * r / (r_norm ** 3)
 
     return accel
+
+# ------------------- THRUST ACCELERATION -------------------
+
+def thrust_acceleration(t: float, y: np.ndarray, ship: object, guidance: object) -> tuple[np.ndarray, float]:
+    """Compute thrust acceleration and mass flow rate."""
+    if guidance is not None and ship is not None:
+        _, thrust_dir, throttle = guidance.update(t, y)
+        ship.thrust_direction = thrust_dir
+        ship.throttle = throttle
+        # Thrust acceleration and mass flow rate
+        a_thrust = ship.thrust_vector              # AU/day²
+        dm_dt =  - ship.mdot_kgpd                  # kg/day
+    else:
+        # No guidance, no thrust
+        a_thrust = np.array([0.0, 0.0, 0.0])
+        dm_dt = 0.0
+    
+    return a_thrust, dm_dt
