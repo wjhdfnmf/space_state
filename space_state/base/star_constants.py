@@ -17,6 +17,8 @@ pc.read_text(load('./ephemeris/pck00011.tpc')) # https://naif.jpl.nasa.gov/pub/n
 c = pc.variables
 
 # ------------------- CONSTANTS -------------------
+g0 = 9.80665  # Standard gravity in m/s²
+
 # Gravitational parameters and radii for celestial bodies
 BODIES = {
     'sun': {
@@ -68,13 +70,6 @@ BODIES = {
         "mu_km3_s2": None,
         "radius": None
     }
-}
-
- # Altitudes in km
-ORBITS = {
-    'earth_leo': 400,
-    'earth_gso': 35786,
-    'moon_orbit': 100,
 }
 
 # ------------------- TIME UTILITIES -------------------

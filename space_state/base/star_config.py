@@ -3,13 +3,17 @@ from typing import NamedTuple
 from astropy.time import Time
 
 from .star_logger import logger
+from .star_utils import sec_to_days
+
 
 class SimulationConfig(NamedTuple):
-    SECONDS_PER_DAY = 86400
-    g0 = 9.80665  # Standard gravity in m/s²
+
+    log_verbose: bool = True
+    integrator: str = 'DOP853'  # 'RK45', 'RK23', 'DOP853', 'LSODA'
+    progress_bar: bool = True
     rtol: float = 1e-9
     atol: float = 1e-9
-    max_step: float = 60 / SECONDS_PER_DAY # days (60 seconds)
+    max_step: float = sec_to_days(60) # days (60 seconds)
     verbose = True
     start_time = Time('2025-11-14 00:00:00', scale='utc')
     all_bodies = ["sun", "earth", "moon", "mars barycenter", "jupiter barycenter", "venus barycenter", "saturn barycenter"]

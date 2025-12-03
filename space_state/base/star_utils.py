@@ -69,7 +69,7 @@ def mps2_apd2(m_per_s2: float) -> float:
     return (m_per_s2 * u.m / u.s**2).to(u.au / u.day**2).value
 
 def mps2_to_kps2(m_per_s2: float) -> float:
-    # Convert acceleration from m/s² to km/s
+    # Convert acceleration from m/s² to km/s²
     return (m_per_s2 * u.m / u.s**2).to(u.km / u.s**2).value
 
 # Energy conversions

@@ -10,7 +10,7 @@ from .star_logger import logger
 
 
 # Type aliases for unit clarity (no runtime cost)
-Length = float        # automical units (AU)
+Length = float        # astronomical units (AU)
 Velocity = float      # AU/day
 Time = float          # days
 Mass = float          # kg

@@ -276,7 +276,7 @@ def moon_intercept(
         body: dict,
         target_body: dict,
         time_forward: float = 0.1,
-        grip_size: int = 1_000,
+        grid_size: int = 1_000,
         plot: bool = False,
 ) -> dict:
     
@@ -290,8 +290,8 @@ def moon_intercept(
 
     logger.debug(f"Starting Moon intercept analysis...")
 
-    #for t in np.linspace(t0, t0 + time_forward, grip_size):
-    for t in tqdm(np.linspace(t0, t0 + time_forward, grip_size), desc="Processing", unit="steps"):
+    #for t in np.linspace(t0, t0 + time_forward, grid_size):
+    for t in tqdm(np.linspace(t0, t0 + time_forward, grid_size), desc="Processing", unit="steps"):
 
         t1 = get_hohmann_state_at_time(prop_hist, body, t, 'tli_apo', use_prop=True)
         t2 = get_circular_state_at_apoapsis(body, t, t1['y_transfer'])
@@ -342,7 +342,7 @@ def moon_intercept(
 def finalize_lunar_orbit_insertion(
         prop: Propagator,
         time_forward: float = 2.0,
-        grip_size: int = 1_000,
+        grid_size: int = 1_000,
         plot: bool = True,
 ) -> dict:
     """Determine burn to enter lunar orbit when distance to Moon is minimized."""
@@ -360,7 +360,7 @@ def finalize_lunar_orbit_insertion(
 
     logger.debug(f"Starting Moon intercept analysis...")
 
-    for t in tqdm(np.linspace(t0, t0 + time_forward, grip_size), desc="Processing", unit="steps"):
+    for t in tqdm(np.linspace(t0, t0 + time_forward, grid_size), desc="Processing", unit="steps"):
 
         prop_hist.propagate(t)
 

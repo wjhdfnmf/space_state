@@ -47,12 +47,12 @@ class Thruster:
         """Mass flow rate [kg/s] at current throttle."""
         if self._throttle == 0.0:
             return 0.0
-        return self._thrust / (self._velocity_exhaust)  # kg/s # 100 is cheating
+        return self._thrust / (self._velocity_exhaust)  # kg/s
     
     @property
     def _max_mdot(self) -> float:
         """Maximum mass flow rate [kg/s] at full throttle."""
-        return self.__thrust_max / (self._velocity_exhaust)  # kg/s # 100 is cheating
+        return self.__thrust_max / (self._velocity_exhaust)  # kg/s
     
     def _set_throttle(self, level: float):
         """Set throttle level (0.0 to 1.0)."""
@@ -71,7 +71,6 @@ class Spacecraft:
         self._propellant_mass = propellant_mass     # kg
         self._thrusters = thrusters     
 
-        self.dummy = False
         self._thrust_direction = np.array([0.0, 0.0, 1.0])  # Default aft
         self._initial_propellant = propellant_mass
 
@@ -103,7 +102,7 @@ class Spacecraft:
     def thrust_direction(self, direction: np.ndarray):
         norm = np.linalg.norm(direction)
         if norm == 0.0:
-            if not self.dummy: raise ValueError("Thrust direction cannot be zero vector")
+            raise ValueError("Thrust direction cannot be zero vector")
         self._thrust_direction = direction / norm
 
     @property
@@ -167,7 +166,7 @@ class Spacecraft:
     @throttle.setter
     def throttle(self, level: float):
         if level < 0.0 or level > 1.0:
-            if not self.dummy: raise ValueError("Throttle level must be between 0.0 and 1.0")
+            raise ValueError("Throttle level must be between 0.0 and 1.0")
         for thruster in self.thrusters:
             thruster._set_throttle(level)
 
@@ -191,7 +190,7 @@ class Spacecraft:
         """Consume propellant over time interval dt_sec."""
         remaining = mass - self.dry_mass
         #if remaining < 0.0:
-        #    if not self.dummy: logger.warning(f"Propellant mass exaused for {self._name}, setting to zero.")
+        #    logger.warning(f"Propellant mass exaused for {self._name}, setting to zero.")
         self._propellant_mass = max(0.0, remaining)
 
     def log(self):

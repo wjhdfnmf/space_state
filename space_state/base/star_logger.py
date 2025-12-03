@@ -1,7 +1,9 @@
 # base/star_logger.py
 import logging
 
-verbose = True
+from .star_config import CONFIG
+
+verbose = CONFIG.log_verbose
 
 logger = logging.getLogger("space_state.dynamics")
 if not logger.handlers:
