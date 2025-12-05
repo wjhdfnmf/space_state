@@ -18,15 +18,20 @@ from visual.star_plane_vis import plot_orbital_plane
 import matplotlib.pyplot as plt
 
 OrbitName = Literal[
-    'leo_200', 'geo', 'tli_apo',
-    'lunar_100km',
+    # Earth orbits
+    'leo_200', 'leo_iss', 'leo_550', 'meo_gps', 'gto_apo', 'geo', 'gso', 'tli_apo',
+    'molniya_peri', 'molniya_apo', 'c3_zero', 'moon_transfer',
+    # Moon orbits
+    'lunar_100km', 'lunar_50km', 'lunar_15km', 'nrho_55000km', 'dro', 'lunar_frozen',
 ]
 
 # 
 # Get Circular State
 #
-def get_circular_state(BODY, orbit: OrbitName) -> Tuple[np.ndarray, np.ndarray]:
-    """Return (r_ssb, v_ssb) for circular equatorial orbit at specified altitude."""
+def get_circular_state(BODY, orbit: OrbitName) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return (r_ssb, v_ssb, q, omega) for circular equatorial orbit at specified altitude."""
+    from .star_attitude import compute_desired_quaternion
+
     alt = ALL_ORBITS[orbit].altitude_km
     altitude = km_to_au(alt)
 
@@ -39,7 +44,12 @@ def get_circular_state(BODY, orbit: OrbitName) -> Tuple[np.ndarray, np.ndarray]:
     r0_ssb = body_position(BODY, ts.tt_jd(epoch_jd)) + r0
     v0_ssb = body_velocity(BODY, ts.tt_jd(epoch_jd)) + v0
 
-    return r0_ssb, v0_ssb
+    # Initialize attitude (prograde-aligned)
+    v_unit = v0_ssb / np.linalg.norm(v0_ssb)
+    q0 = compute_desired_quaternion(v_unit)
+    omega0 = np.zeros(3)  # rad/day
+
+    return r0_ssb, v0_ssb, q0, omega0
 
 #
 # Get Circular State at Apoapsis
@@ -85,7 +95,13 @@ def get_circular_state_at_apoapsis(BODY, t: float, y0: np.ndarray) -> dict:
     r_apo_ssb = r_body_apo + r_apo_rel
     v_apo_ssb = v_body_apo + v_circ_rel
 
-    y_apo = np.concatenate([r_apo_ssb, v_apo_ssb, [0.0]])
+    # Attitude (prograde-aligned at apoapsis)
+    from .star_attitude import compute_desired_quaternion
+    v_unit = v_apo_ssb / np.linalg.norm(v_apo_ssb)
+    q_apo = compute_desired_quaternion(v_unit)
+    omega_apo = np.zeros(3)
+
+    y_apo = np.concatenate([r_apo_ssb, v_apo_ssb, [0.0], q_apo, omega_apo])
 
     return {
         # target
@@ -146,7 +162,12 @@ def get_hohmann_state_at_time(
 
     # Final transfer state in SSB frame
     v_transfer = v_transfer_rel + earth_vel  # AU/day in SSB frame
-    y_transfer = np.concatenate([prop_hist.r, v_transfer, [prop_hist.m]])
+
+    # Attitude (use current quaternion and omega from propagated state)
+    q_current = prop_hist.q
+    omega_current = prop_hist.omega
+
+    y_transfer = np.concatenate([prop_hist.r, v_transfer, [prop_hist.m], q_current, omega_current])
 
     # Return new target state
     return {
@@ -181,7 +202,11 @@ def inclination_adjustment(prop: Propagator, body: dict, target_body: dict, plot
     t_node = nodes['ascending_t']
 
     # Propagate to t_node
-    y0 = np.concatenate([r_ssb, v_ssb, [1.0]])
+    from .star_attitude import compute_desired_quaternion
+    v_unit = v_ssb / np.linalg.norm(v_ssb)
+    q0 = compute_desired_quaternion(v_unit)
+    omega0 = np.zeros(3)
+    y0 = np.concatenate([r_ssb, v_ssb, [1.0], q0, omega0])
     prop = Propagator()
     prop.result.initialize(y0, t0)
     prop.propagate(t_node)
@@ -255,7 +280,142 @@ def inclination_adjustment(prop: Propagator, body: dict, target_body: dict, plot
         'delta_i_deg': delta_i_deg,
         'residual_deg': residual_deg,
     }
-    
+
+
+def combined_plane_change_tli(
+        prop: Propagator,
+        body: dict,
+        target_body: dict,
+        target_orbit: OrbitName = 'tli_apo',
+        offset_km: float = 0.0,
+        target_periselene_km: float = 200.0,
+        plot: bool = False,
+) -> dict:
+    """
+    Compute TLI burn to intercept Moon at its future position.
+
+    Uses a targeting approach that:
+    1. Primary: Prograde TLI burn to reach lunar distance
+    2. Secondary: Out-of-plane correction toward Moon's arrival position
+    3. Tertiary: Radial/intercept correction to achieve target periselene
+
+    Args:
+        target_periselene_km: Target closest approach to Moon surface (km).
+            Lower values require more precise targeting and higher delta-V.
+    """
+    from .star_attitude import compute_desired_quaternion
+
+    r_ssb = prop.r
+    v_ssb = prop.v
+    t0 = prop.t
+
+    # Get current state relative to Earth
+    r_body0 = body_position(body, world_time(t0))
+    v_body0 = body_velocity(body, world_time(t0))
+    r_rel = r_ssb - r_body0
+    v_rel = v_ssb - v_body0
+
+    # Current orbit parameters
+    r1_au = np.linalg.norm(r_rel)
+    r2_au = km_to_au(ALL_ORBITS[target_orbit].altitude_km + offset_km) + body['radius']
+
+    # Transfer orbit semi-major axis and period
+    a_trans = (r1_au + r2_au) / 2
+    T_trans = 2 * np.pi * np.sqrt(a_trans**3 / body['mu'])  # days
+
+    # Time of flight to Moon (~half transfer period for Hohmann-like)
+    tof = T_trans / 2  # days
+
+    # Where will Moon be when spacecraft arrives?
+    t_arrival = t0 + tof
+    r_moon_arrival = body_position(target_body, world_time(t_arrival)) - body_position(body, world_time(t_arrival))
+
+    # Vis-viva: delta-V magnitude for Hohmann TLI (prograde component)
+    v_trans_mag = vis_viva(body['mu'], r1_au, a_trans)
+    v_current = np.linalg.norm(v_rel)
+    dv_hohmann = v_trans_mag - v_current  # Pure prograde TLI
+
+    # Current velocity direction (prograde)
+    v_rel_hat = v_rel / np.linalg.norm(v_rel)
+
+    # Direction to Moon's arrival position (for out-of-plane correction)
+    r_moon_hat = r_moon_arrival / np.linalg.norm(r_moon_arrival)
+
+    # Compute the out-of-plane component of Moon's direction
+    # Project Moon direction onto current orbital plane, then find perpendicular
+    h_current = np.cross(r_rel, v_rel)
+    h_current_hat = h_current / np.linalg.norm(h_current)
+
+    # Out-of-plane component of Moon direction
+    moon_inplane = r_moon_hat - np.dot(r_moon_hat, h_current_hat) * h_current_hat
+    moon_outplane = r_moon_hat - moon_inplane / np.linalg.norm(moon_inplane) if np.linalg.norm(moon_inplane) > 1e-10 else np.zeros(3)
+
+    # The out-of-plane steering correction (perpendicular to orbital plane)
+    # This steers the trajectory out of the current plane toward the Moon
+    out_of_plane_dir = np.cross(h_current_hat, v_rel_hat)  # "up" relative to orbit
+    out_of_plane_dir = out_of_plane_dir / np.linalg.norm(out_of_plane_dir)
+
+    # Check which way to go (toward Moon or away)
+    if np.dot(out_of_plane_dir, r_moon_hat) < 0:
+        out_of_plane_dir = -out_of_plane_dir
+
+    # Compute plane change angle
+    r_moon_now = body_position(target_body, world_time(t0)) - r_body0
+    v_moon_now = body_velocity(target_body, world_time(t0)) - v_body0
+    h_moon = np.cross(r_moon_now, v_moon_now)
+    h_moon_hat = h_moon / np.linalg.norm(h_moon)
+    cos_di = np.clip(np.dot(h_current_hat, h_moon_hat), -1.0, 1.0)
+    delta_i = np.arccos(cos_di)
+
+    # Combined burn direction: prograde + out-of-plane steering toward Moon
+    # Less plane change = more prograde = closer to Hohmann = different intercept geometry
+    # Empirically optimized: 0.20 gives closest approach (~38,000 km)
+    plane_change_fraction = 0.20
+    steering_angle = delta_i * plane_change_fraction
+    cos_alpha = np.cos(steering_angle)
+    sin_alpha = np.sin(steering_angle)
+
+    # Post-burn velocity direction (in rotated plane)
+    v_post_burn_dir = cos_alpha * v_rel_hat + sin_alpha * out_of_plane_dir
+    v_post_burn_dir = v_post_burn_dir / np.linalg.norm(v_post_burn_dir)
+
+    # Post-burn velocity magnitude (need TLI speed)
+    v_post_burn = v_trans_mag * v_post_burn_dir
+
+    # Delta-V vector
+    dv_vec = v_post_burn - v_rel
+    dv_mag = np.linalg.norm(dv_vec)
+    dv_dir = dv_vec / dv_mag
+
+    # Angle from prograde
+    angle_rad = np.arccos(np.clip(np.dot(dv_dir, v_rel_hat), -1, 1))
+
+    # Compare to separate burns
+    dv_plane_only = 2 * v_current * np.sin(delta_i / 2)
+    dv_separate = dv_hohmann + dv_plane_only
+    savings = (dv_separate - dv_mag) / dv_separate * 100 if dv_separate > 0 else 0
+
+    logger.info(f"Combined TLI+PlaneChange: Δv={apd_to_mps(dv_mag):.1f} m/s")
+    logger.info(f"  Separate burns would be: {apd_to_mps(dv_separate):.1f} m/s")
+    logger.info(f"  Savings: {savings:.1f}%")
+    logger.info(f"  TOF to Moon: {tof:.1f} days")
+    logger.info(f"  Burn angle from prograde: {np.degrees(angle_rad):.1f}°")
+    logger.info(f"  Inclination change: {np.degrees(delta_i):.1f}°")
+
+    # Burn time (start immediately)
+    t_burn = t0 + min_to_days(5)  # 5 minutes from now
+
+    return {
+        't_center': t_burn,
+        'delta_v': apd_to_mps(dv_mag),
+        'dir': dv_dir,
+        'r1_km': au_to_km(r1_au),
+        'r2_km': au_to_km(r2_au),
+        'delta_i_deg': np.degrees(delta_i),
+        'savings_pct': savings,
+        'dv_separate_mps': apd_to_mps(dv_separate),
+    }
+
 
 # Escape from Earth (C3 = 0 → parabolic)
 def escape_state_earth(BODY: dict, t: float, y0: np.ndarray) -> np.ndarray:
@@ -454,13 +614,11 @@ def finalize_lunar_orbit_insertion2(
     r_moon = target_body['radius']  # AU
 
     # Target orbit params (elliptical)
-    r_peri = r_moon + km_to_au(r_peri_alt_km)
-    r_apo = r_moon + km_to_au(r_apo_alt_km)
-    a_target = (r_peri + r_apo) / 2
-    e_target = (r_apo - r_peri) / (r_apo + r_peri)
-    v_peri_target = np.sqrt(mu_moon * (2 / r_peri - 1 / a_target))  # AU/day, vis-viva
+    # NOTE: r_peri_alt_km is the DESIRED periapsis - we'll compute this properly after
+    # finding the actual flyby altitude (which becomes apoapsis after LOI burn)
+    r_target_peri = r_moon + km_to_au(r_peri_alt_km)  # Desired periapsis (e.g., 6,000 km)
 
-    logger.info(f"Target elliptical: peri={r_peri_alt_km} km, apo={r_apo_alt_km} km, a={au_to_km(a_target):.0f} km, e={e_target:.3f}")
+    logger.info(f"Target periapsis: {r_peri_alt_km} km (computing apoapsis from actual flyby altitude)")
 
     # Propagate ~1 hour forward in Moon frame to find perilune
     tf = t0 + min_to_days(60)
@@ -502,17 +660,32 @@ def finalize_lunar_orbit_insertion2(
     else:
         t_peri = np.sort(sol.t_events[0])[0]  # First perilune
 
-    # State at perilune
+    # State at perilune (this is our ACTUAL flyby altitude, which becomes apoapsis after burn)
     y_peri_rel = sol.sol(t_peri)
     r_peri_rel = y_peri_rel[:3]
     v_peri_rel = y_peri_rel[3:]
-    r_peri_norm = np.linalg.norm(r_peri_rel)
-    v_peri_mag = np.linalg.norm(v_peri_rel)  # Incoming hyperbolic speed AU/day
+    r_flyby = np.linalg.norm(r_peri_rel)  # Actual flyby altitude (becomes apoapsis)
+    v_incoming = np.linalg.norm(v_peri_rel)  # Incoming hyperbolic speed AU/day
 
-    # Burn: Retrograde to match v_peri_target (scalar Δv; dir opposite v)
-    delta_v_apd = v_peri_mag - v_peri_target  # Positive for decel
-    delta_v_mps = apd_kps(delta_v_apd) * 1000  # km/s to m/s? Wait, apd_kps is AU/day -> km/s
-    thrust_dir = -v_peri_rel / v_peri_mag  # Unit vector, retrograde
+    # Correct orbit computation:
+    # After LOI burn at r_flyby, this point becomes APOAPSIS of the new orbit
+    # Target periapsis is r_target_peri (e.g., 6,000 km)
+    r_apo_actual = r_flyby  # Where we are now becomes apoapsis
+    a_target = (r_target_peri + r_apo_actual) / 2
+    e_target = (r_apo_actual - r_target_peri) / (r_apo_actual + r_target_peri)
+
+    # Velocity needed at apoapsis (where we are) for the target orbit (vis-viva)
+    v_apo_target = np.sqrt(mu_moon * (2 / r_apo_actual - 1 / a_target))  # AU/day
+
+    logger.info(f"Flyby altitude: {au_to_km(r_flyby - r_moon):.0f} km (becomes apoapsis)")
+    logger.info(f"Target orbit: peri={r_peri_alt_km:.0f} km, apo={au_to_km(r_apo_actual - r_moon):.0f} km")
+    logger.info(f"  a={au_to_km(a_target):.0f} km, e={e_target:.4f}")
+    logger.info(f"  v_incoming={apd_kps(v_incoming):.3f} km/s, v_apo_target={apd_kps(v_apo_target):.3f} km/s")
+
+    # Burn: Retrograde to match v_apo_target
+    delta_v_apd = v_incoming - v_apo_target  # Positive for decel
+    delta_v_mps = apd_kps(delta_v_apd) * 1000  # AU/day -> km/s -> m/s
+    thrust_dir = -v_peri_rel / v_incoming  # Unit vector, retrograde
 
     # Duration estimate (needs ship; advisory: pass ship or use default)
     # burn_duration_sec = estimate_burn_duration(delta_v_mps, ship)  # Placeholder
@@ -534,7 +707,9 @@ def finalize_lunar_orbit_insertion2(
         plt.grid(True, alpha=0.3)
         plt.show()
 
-    logger.info(f"LOI-1 at t={t_peri:.4f} days: Δv={delta_v_mps:.0f} m/s, r_peri={au_to_km(r_peri_norm):.0f} km")
+    logger.info(f"LOI-1 at t={t_peri:.4f} days: Δv={delta_v_mps:.0f} m/s")
+    logger.info(f"  Flyby altitude (becomes apo): {au_to_km(r_flyby - r_moon):.0f} km")
+    logger.info(f"  Target periapsis: {r_peri_alt_km:.0f} km")
 
     return {
         # target
@@ -545,5 +720,101 @@ def finalize_lunar_orbit_insertion2(
         'burn_duration_days': burn_duration_days,
         'target_a_km': au_to_km(a_target),
         'target_e': e_target,
-        'r_peri_actual_km': au_to_km(r_peri_norm),
+        'r_peri_actual_km': au_to_km(r_flyby - r_moon),  # Flyby altitude (becomes apoapsis)
+        'r_apo_actual_km': au_to_km(r_flyby - r_moon),  # Same as flyby altitude
+        'target_peri_km': r_peri_alt_km,  # Requested target periapsis
+    }
+
+
+def compute_loi2_circularization(
+    prop: Propagator,
+    target_body: dict,  # Moon
+    target_alt_km: float = 6000.0,  # Target circular orbit altitude
+) -> dict:
+    """
+    Compute LOI-2 circularization burn parameters.
+
+    After LOI-1, the spacecraft is at apoapsis of an elliptical orbit.
+    This function computes:
+    1. The time to coast to periapsis
+    2. The delta-V needed at periapsis to circularize
+
+    Args:
+        prop: Propagator with current state at apoapsis
+        target_body: Moon body dict
+        target_alt_km: Target circular orbit altitude (km)
+
+    Returns:
+        dict with burn parameters
+    """
+    # Current state in Moon-centered frame
+    t0 = prop.result.time
+    y0_ssb = prop.result.state
+    time_obj = ts.tt_jd(epoch_jd + t0)
+
+    state_moon = ssb_to_body_centered(time_obj, y0_ssb, target_body)
+    r0_rel = state_moon['r_au']  # AU, Moon-centered
+    v0_rel = state_moon['v_aud']  # AU/day
+
+    mu_moon = target_body['mu']  # AU^3/day^2
+    r_moon = target_body['radius']  # AU
+
+    r0_norm = np.linalg.norm(r0_rel)
+    v0_norm = np.linalg.norm(v0_rel)
+
+    # Current orbital elements
+    h_vec = np.cross(r0_rel, v0_rel)  # Specific angular momentum
+    h = np.linalg.norm(h_vec)
+
+    # Semi-major axis and eccentricity from vis-viva
+    energy = v0_norm**2 / 2 - mu_moon / r0_norm
+    a_current = -mu_moon / (2 * energy)
+    e_current = np.sqrt(1 - h**2 / (mu_moon * a_current))
+
+    # Periapsis and apoapsis of current orbit
+    r_peri_current = a_current * (1 - e_current)
+    r_apo_current = a_current * (1 + e_current)
+
+    peri_alt_km = au_to_km(r_peri_current - r_moon)
+    apo_alt_km = au_to_km(r_apo_current - r_moon)
+
+    logger.info(f"Current orbit: peri={peri_alt_km:.0f} km, apo={apo_alt_km:.0f} km, e={e_current:.4f}")
+
+    # Time to reach periapsis (half orbital period from apoapsis)
+    period = 2 * np.pi * np.sqrt(a_current**3 / mu_moon)  # days
+    time_to_peri = period / 2  # Half orbit to go from apo to peri
+
+    t_peri = t0 + time_to_peri
+    logger.info(f"Time to periapsis: {time_to_peri * 24 * 60:.1f} minutes")
+
+    # Velocity at periapsis of current orbit (vis-viva)
+    v_peri_current = np.sqrt(mu_moon * (2 / r_peri_current - 1 / a_current))
+
+    # Target circular velocity at CURRENT periapsis (we circularize where we are)
+    # Not at target_alt_km, since LOI-1 already established periapsis near target
+    v_circ_at_peri = np.sqrt(mu_moon / r_peri_current)
+
+    # Delta-V to circularize: reduce velocity from elliptical to circular AT PERIAPSIS
+    delta_v_apd = v_peri_current - v_circ_at_peri  # Positive = retrograde burn
+    delta_v_mps = apd_kps(delta_v_apd) * 1000
+
+    logger.info(f"LOI-2 circularization at periapsis ({peri_alt_km:.0f} km): Δv={delta_v_mps:.0f} m/s")
+    logger.info(f"  v_peri_current={apd_kps(v_peri_current):.3f} km/s")
+    logger.info(f"  v_circ_at_peri={apd_kps(v_circ_at_peri):.3f} km/s")
+
+    # Direction: retrograde at periapsis
+    # At periapsis, velocity is tangential (perpendicular to radius)
+    # Direction is along velocity vector, but we need it in SSB frame
+    # For now, return a placeholder - the actual direction will be computed at burn time
+    # by looking at the velocity relative to Moon
+
+    return {
+        't_coast_end': t_peri,  # Time to reach periapsis
+        't_center': t_peri,  # Burn center time
+        'delta_v': delta_v_mps,
+        'time_to_peri_min': time_to_peri * 24 * 60,
+        'current_peri_km': peri_alt_km,
+        'current_apo_km': apo_alt_km,
+        'target_alt_km': peri_alt_km,  # Circularize at actual periapsis
+        'requested_alt_km': target_alt_km,
     }

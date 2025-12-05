@@ -27,3 +27,8 @@ ephemeris/
 *.out
 *.bbl
 *.blg
+
+
+# Other files
+*.txt
+*.png

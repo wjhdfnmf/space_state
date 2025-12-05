@@ -1,9 +1,10 @@
 # base/star_dynamics.py
 
-from typing import Sequence
+from typing import Sequence, Tuple
 import numpy as np
 
-from .star_constants import BODIES, ts, epoch_jd
+from .star_constants import BODIES, ts, epoch_jd, IDX_Q
+from .star_attitude import quaternion_to_dcm
 
 # ------------------- GRAVITATIONAL ACCELERATION -------------------
 
@@ -24,18 +25,45 @@ def n_body_acceleration(t: float, y: np.ndarray, bodies: Sequence[str]) -> np.nd
 
 # ------------------- THRUST ACCELERATION -------------------
 
-def thrust_acceleration(t: float, y: np.ndarray, ship: object, guidance: object) -> tuple[np.ndarray, float]:
-    """Compute thrust acceleration and mass flow rate."""
+def thrust_acceleration(t: float, y: np.ndarray, ship: object, guidance: object) -> Tuple[np.ndarray, float]:
+    """
+    Compute thrust acceleration using ACTUAL spacecraft attitude.
+
+    Args:
+        t: Current time (days)
+        y: State vector (14 elements)
+        ship: Spacecraft object
+        guidance: Guidance controller
+
+    Returns:
+        a_thrust: Thrust acceleration (AU/day²) in inertial frame
+        dm_main: Main engine propellant flow rate (kg/day)
+    """
     if guidance is not None and ship is not None:
-        _, thrust_dir, throttle = guidance.update(t, y)
-        ship.thrust_direction = thrust_dir
+        # Get desired thrust direction from guidance
+        _, thrust_dir_desired, throttle = guidance.update(t, y)
+
+        # Get ACTUAL thrust direction from current quaternion
+        q = y[IDX_Q]
+        R_body_to_inertial = quaternion_to_dcm(q)
+        thrust_dir_actual = R_body_to_inertial @ np.array([0.0, 0.0, 1.0])  # Body +Z axis
+
+        # Set throttle
         ship.throttle = throttle
-        # Thrust acceleration and mass flow rate
-        a_thrust = ship.thrust_vector              # AU/day²
-        dm_dt =  - ship.mdot_kgpd                  # kg/day
+
+        # Compute thrust using ACTUAL pointing direction
+        if hasattr(ship, 'thrust_vector_from_direction'):
+            a_thrust = ship.thrust_vector_from_direction(thrust_dir_actual)
+        else:
+            # Fallback for ships without the new method
+            ship.thrust_direction = thrust_dir_actual
+            a_thrust = ship.thrust_vector
+
+        # Main engine mass flow rate
+        dm_main = -ship.mdot_kgpd  # kg/day (negative = losing mass)
     else:
         # No guidance, no thrust
         a_thrust = np.array([0.0, 0.0, 0.0])
-        dm_dt = 0.0
-    
-    return a_thrust, dm_dt
+        dm_main = 0.0
+
+    return a_thrust, dm_main
