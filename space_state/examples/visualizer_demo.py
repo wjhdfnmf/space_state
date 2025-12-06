@@ -79,9 +79,8 @@ def generate_demo_orbit(n_points=500, orbits=3):
         velocities=np.column_stack([vx, vy, vz]),
         masses=mass,
         quaternions=q,
-        reference_frame="ECI",
-        central_body="earth",
-        name="Demo Spacecraft"
+        name="Demo Spacecraft",
+        color="cyan"
     )
 
 
@@ -125,23 +124,27 @@ def generate_transfer_trajectory(n_points=300):
         velocities=np.column_stack([vx, vy, vz]),
         masses=mass,
         quaternions=q,
-        reference_frame="ECI",
-        central_body="earth",
-        name="Hohmann Transfer"
+        name="Hohmann Transfer",
+        color="orange"
     )
 
 
-def create_demo_events():
-    """Create demonstration events."""
+def create_demo_events(trajectory: TrajectoryData):
+    """Create demonstration events with positions from trajectory."""
+    times = trajectory.times
+    pos = trajectory.positions
+
+    # Find trajectory indices for events
+    launch_idx = 0
+    burn_idx = np.argmin(np.abs(times - 0.001))
+    apogee_idx = np.argmin(np.abs(times - 0.15))
+    insert_idx = np.argmin(np.abs(times - 0.19))
+
     return [
-        EventMarker(time=0.0, name="Launch", event_type="maneuver",
-                   description="Launch from LEO"),
-        EventMarker(time=0.001, name="TMI Burn", event_type="maneuver",
-                   description="Transfer orbit injection"),
-        EventMarker(time=0.15, name="Apogee", event_type="milestone",
-                   description="Transfer orbit apogee"),
-        EventMarker(time=0.19, name="GEO Insertion", event_type="maneuver",
-                   description="Circularization burn"),
+        EventMarker(time=0.0, position=pos[launch_idx], name="Launch", color="green"),
+        EventMarker(time=0.001, position=pos[burn_idx], name="TMI Burn", color="orange"),
+        EventMarker(time=0.15, position=pos[apogee_idx], name="Apogee", color="yellow"),
+        EventMarker(time=0.19, position=pos[insert_idx], name="GEO Insertion", color="red"),
     ]
 
 
@@ -152,14 +155,14 @@ def demo_orbit_viewer():
 
     earth = BodyData(
         name="Earth",
-        radius=6371.0,
-        position=np.array([0, 0, 0]),
+        positions=np.array([0, 0, 0]),
+        radius_km=6371.0,
         color="blue"
     )
 
     print("Creating interactive viewer...")
     fig = create_interactive_trajectory_viewer(
-        trajectories=[trajectory],
+        trajectory=trajectory,
         bodies=[earth],
         title="Interactive Orbit Demo"
     )
@@ -171,21 +174,12 @@ def demo_mission_dashboard():
     """Run the full mission dashboard demo."""
     print("Generating demo trajectory...")
     trajectory = generate_transfer_trajectory()
-    events = create_demo_events()
-
-    earth = BodyData(
-        name="Earth",
-        radius=6371.0,
-        position=np.array([0, 0, 0]),
-        color="blue"
-    )
 
     print("Creating mission dashboard...")
     fig = create_mission_dashboard(
-        trajectories=[trajectory],
-        bodies=[earth],
-        events=events,
-        title="Hohmann Transfer Mission Dashboard"
+        trajectory=trajectory,
+        central_body='earth',
+        show_elements=True,
     )
 
     fig.show()
@@ -234,13 +228,13 @@ def demo_static_plots():
     # Attitude plot
     fig2, axes = plt.subplots(2, 2, figsize=(12, 8))
 
-    time_hrs = trajectory.time * 24
+    time_hrs = trajectory.times * 24
 
     # Quaternion components
-    axes[0, 0].plot(time_hrs, trajectory.quaternion[:, 0], label='q0 (scalar)')
-    axes[0, 0].plot(time_hrs, trajectory.quaternion[:, 1], label='q1')
-    axes[0, 0].plot(time_hrs, trajectory.quaternion[:, 2], label='q2')
-    axes[0, 0].plot(time_hrs, trajectory.quaternion[:, 3], label='q3')
+    axes[0, 0].plot(time_hrs, trajectory.quaternions[:, 0], label='q0 (scalar)')
+    axes[0, 0].plot(time_hrs, trajectory.quaternions[:, 1], label='q1')
+    axes[0, 0].plot(time_hrs, trajectory.quaternions[:, 2], label='q2')
+    axes[0, 0].plot(time_hrs, trajectory.quaternions[:, 3], label='q3')
     axes[0, 0].set_xlabel('Time (hours)')
     axes[0, 0].set_ylabel('Quaternion')
     axes[0, 0].set_title('Attitude Quaternion')
@@ -248,7 +242,7 @@ def demo_static_plots():
     axes[0, 0].grid(True, alpha=0.3)
 
     # Position magnitude
-    r_mag = np.linalg.norm(trajectory.position, axis=1)
+    r_mag = np.linalg.norm(trajectory.positions, axis=1)
     axes[0, 1].plot(time_hrs, r_mag)
     axes[0, 1].set_xlabel('Time (hours)')
     axes[0, 1].set_ylabel('Altitude (km)')
@@ -256,7 +250,7 @@ def demo_static_plots():
     axes[0, 1].grid(True, alpha=0.3)
 
     # Velocity magnitude
-    v_mag = np.linalg.norm(trajectory.velocity, axis=1)
+    v_mag = np.linalg.norm(trajectory.velocities, axis=1)
     axes[1, 0].plot(time_hrs, v_mag)
     axes[1, 0].set_xlabel('Time (hours)')
     axes[1, 0].set_ylabel('Velocity (km/s)')
@@ -264,7 +258,7 @@ def demo_static_plots():
     axes[1, 0].grid(True, alpha=0.3)
 
     # Mass
-    axes[1, 1].plot(time_hrs, trajectory.mass)
+    axes[1, 1].plot(time_hrs, trajectory.masses)
     axes[1, 1].set_xlabel('Time (hours)')
     axes[1, 1].set_ylabel('Mass (kg)')
     axes[1, 1].set_title('Spacecraft Mass')
@@ -281,24 +275,24 @@ def demo_full_viewer():
     """Run the full interactive mission viewer (Dash app)."""
     print("Generating trajectory data...")
     trajectory = generate_transfer_trajectory()
-    events = create_demo_events()
+    events = create_demo_events(trajectory)
 
     earth = BodyData(
         name="Earth",
-        radius=6371.0,
-        position=np.array([0, 0, 0]),
+        positions=np.array([0, 0, 0]),
+        radius_km=6371.0,
         color="blue"
     )
 
     print("\nLaunching Mission Viewer...")
-    print("Open your browser to: http://127.0.0.1:8050")
+    print("Open your browser to: http://127.0.0.1:8051")
     print("Press Ctrl+C to stop\n")
 
     run_mission_viewer(
-        trajectories=[trajectory],
+        trajectory=trajectory,
         bodies=[earth],
         events=events,
-        title="Demo Mission Viewer"
+        port=8051,
     )
 
 

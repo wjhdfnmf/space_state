@@ -36,6 +36,9 @@ from base import (
     BODIES, CONFIG, Propagator, starship_raptor_vac,
     get_circular_state, get_circular_state_at_apoapsis,
     vis_viva, circular_velocity, orbital_period,
+    # Mission logging imports
+    FlightDataRecorder, MissionController, DisplayMode,
+    create_fdr, generate_mission_plots,
 )
 from base.star_constants import AU_TO_KM, DAY_TO_SEC, epoch_jd, ts
 from base.star_utils import (
@@ -95,6 +98,11 @@ class MissionConfig:
 
     # Timing
     MAX_MISSION_DURATION_DAYS = 5.0
+
+    # Mission logging
+    ENABLE_FDR = True
+    FDR_INTERVAL = 0.001  # Record every 0.001 days (~86 sec)
+    DISPLAY_MODE = DisplayMode.COMPACT
 
 
 # ==============================================================================
@@ -766,26 +774,119 @@ def run_mission():
     target_body = BODIES['moon']
     initial_mass = ship.mass
 
+    # -------------------------------------------------------------------------
+    # MISSION CONTROLLER SETUP
+    # -------------------------------------------------------------------------
+    controller = None
+    if cfg.ENABLE_FDR:
+        controller = MissionController(
+            mission_name=cfg.NAME,
+            display_mode=cfg.DISPLAY_MODE,
+            enable_fdr=True,
+            fdr_interval=cfg.FDR_INTERVAL,
+            display_interval=5.0,  # Update every 5 seconds
+        )
+        controller.set_spacecraft(ship)
+        controller.set_bodies(BODIES)
+        print(f"\n  FDR Enabled: Log directory = {controller.fdr.log_dir if controller.fdr else 'N/A'}")
+
     # Phase 1: LEO Setup
+    if controller:
+        controller.begin_phase("LEO INITIALIZATION", f"Altitude: {cfg.LEO_ALTITUDE_KM} km")
     y0, t0, prop, guid = phase1_leo_setup(ship, body)
 
+    # Attach controller to propagator
+    if controller:
+        controller.set_start_time(t0)
+        controller.begin_mission()
+        prop.attach_controller(controller)
+
     # Phase 2: TLI Burn
+    if controller:
+        controller.begin_phase("TRANS-LUNAR INJECTION", "Combined plane change + TLI burn")
+        controller.start_burn(prop.t, "TLI Burn")
     tli_params = phase2_tli_burn(prop, guid, ship, body, target_body)
+    if controller:
+        controller.end_burn(prop.t, "TLI Burn")
+        controller.log_event(prop.t, "TLI_COMPLETE", f"Delta-V: {tli_params['delta_v']:.1f} m/s")
 
     # Phase 3: Trans-Lunar Coast
+    if controller:
+        controller.begin_phase("TRANS-LUNAR COAST", "Coast to lunar encounter")
     intercept_params = phase3_lunar_coast(prop, guid, ship, body, target_body)
+    if controller:
+        controller.log_event(
+            intercept_params['t_perilune'], "LUNAR_INTERCEPT",
+            f"Closest approach: {intercept_params['distance']:.0f} km, TOF: {intercept_params['TOF']:.2f} days"
+        )
 
     # Phase 4: LOI-1 Burn (Capture)
+    if controller:
+        controller.begin_phase("LOI-1 CAPTURE", "Lunar orbit insertion burn")
+        controller.start_burn(prop.t, "LOI-1 Burn")
     loi_params = phase4_loi_burn(prop, guid, ship, body, target_body)
+    if controller:
+        controller.end_burn(prop.t, "LOI-1 Burn")
+        controller.log_event(prop.t, "LOI1_COMPLETE", f"Delta-V: {loi_params['delta_v']:.1f} m/s")
 
     # Phase 4b: LOI-2 Burn (Circularization)
+    if controller:
+        controller.begin_phase("LOI-2 CIRCULARIZATION", f"Target altitude: {cfg.TARGET_LUNAR_ALT_KM} km")
+        controller.start_burn(prop.t, "LOI-2 Burn")
     loi2_params = phase4b_loi2_burn(prop, guid, ship, target_body)
+    if controller:
+        controller.end_burn(prop.t, "LOI-2 Burn")
+        controller.log_event(prop.t, "LOI2_COMPLETE", f"Delta-V: {loi2_params['delta_v']:.1f} m/s")
 
     # Phase 5: Lunar Orbit
+    if controller:
+        controller.begin_phase("LUNAR ORBIT OPERATIONS", "Final orbit verification")
     phase5_lunar_orbit(prop, guid, ship, target_body)
 
     # Mission duration
     duration_days = prop.t - t0
+
+    # -------------------------------------------------------------------------
+    # RECORD TRAJECTORY AND FINALIZE
+    # -------------------------------------------------------------------------
+    if controller and controller.fdr:
+        # Record full trajectory from propagation result
+        frames = controller.fdr.record_trajectory(prop.result, ship, BODIES, downsample=5)
+        print(f"\n  Recorded {frames} trajectory frames to FDR")
+
+        # Force final update
+        controller.update(prop.t, prop.y, force=True)
+
+        # Finalize mission
+        total_dv = tli_params['delta_v'] + loi_params['delta_v'] + loi2_params['delta_v']
+        finalize_result = controller.finalize(
+            success=True,
+            objectives=[
+                "LEO departure completed",
+                "TLI burn executed",
+                "Trans-lunar coast completed",
+                "LOI-1 capture burn executed",
+                "LOI-2 circularization burn executed",
+                f"Lunar orbit established at {cfg.TARGET_LUNAR_ALT_KM} km",
+            ]
+        )
+
+        if finalize_result:
+            print_header("MISSION DATA EXPORT", "-")
+            summary = finalize_result['summary']
+            print(f"  Duration: {summary.duration_str}")
+            print(f"  Total Delta-V: {summary.total_delta_v_mps:.1f} m/s")
+            print(f"  Propellant Used: {summary.propellant_used_kg:,.0f} kg")
+            print()
+            print("  Saved Files:")
+            for fmt, path in finalize_result['files'].items():
+                print(f"    {fmt}: {path}")
+
+        # Generate mission plots
+        print_header("GENERATING MISSION PLOTS", "-")
+        plots = generate_mission_plots(controller.fdr, show=False)
+        for name, path in plots.items():
+            print(f"    {name}: {path}")
 
     # Generate visualizations
     generate_visualizations(prop, ship, cfg)
@@ -801,7 +902,7 @@ def run_mission():
     print("  MISSION COMPLETE")
     print("=" * 70 + "\n")
 
-    return prop, ship
+    return prop, ship, controller if controller else None
 
 
 # ==============================================================================
@@ -810,7 +911,10 @@ def run_mission():
 
 if __name__ == "__main__":
     try:
-        prop, ship = run_mission()
+        result = run_mission()
+        prop = result[0]
+        ship = result[1]
+        controller = result[2] if len(result) > 2 else None
     except KeyboardInterrupt:
         print("\n\nMission aborted by user.")
     except Exception as e:

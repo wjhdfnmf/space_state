@@ -1,6 +1,6 @@
 # base/star_propagator.py
 import time
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Optional, Sequence, Tuple, TYPE_CHECKING
 import numpy as np
 from scipy.integrate import solve_ivp
 
@@ -10,6 +10,11 @@ from .star_utils import log_guidance
 from .star_config import CONFIG
 from .star_ship import Spacecraft
 from .star_logger import logger
+
+if TYPE_CHECKING:
+    from .star_fdr import FlightDataRecorder
+    from .star_console import MissionController
+    from .star_disturbance import DisturbanceTorqueModel
 
 
 # ------------------- PROPAGATOR CLASS -------------------
@@ -23,6 +28,7 @@ class Propagator:
         drag_enabled: bool = False,
         drag_area: float = 100.0,
         drag_coefficient: float = 2.2,
+        disturbance_model: 'DisturbanceTorqueModel' = None,
     ):
         self.ship = ship
         self.guidance = guidance
@@ -34,8 +40,17 @@ class Propagator:
         self.drag_area = drag_area
         self.drag_coefficient = drag_coefficient
 
+        # Disturbance torque model (optional)
+        self._disturbance_model = disturbance_model
+        self._current_soi_body = 'earth'  # Track current SOI body for disturbance torques
+
         # Coast mode - skip attitude control for fast interplanetary cruise
         self._coast_mode = False
+
+        # Flight Data Recorder and Mission Controller (optional)
+        self._fdr: Optional['FlightDataRecorder'] = None
+        self._controller: Optional['MissionController'] = None
+        self._fdr_enabled = False
     
     @property
     def y(self) -> np.ndarray:
@@ -83,6 +98,64 @@ class Propagator:
     def coast_mode(self, value: bool):
         """Enable/disable coast mode."""
         self._coast_mode = value
+
+    @property
+    def disturbance_model(self) -> Optional['DisturbanceTorqueModel']:
+        """Disturbance torque model (if enabled)."""
+        return self._disturbance_model
+
+    @disturbance_model.setter
+    def disturbance_model(self, model: 'DisturbanceTorqueModel'):
+        """Set disturbance torque model."""
+        self._disturbance_model = model
+
+    def set_soi_body(self, body_name: str) -> None:
+        """
+        Set the current SOI body for disturbance torque calculations.
+
+        Args:
+            body_name: Name of the body whose SOI spacecraft is in
+        """
+        self._current_soi_body = body_name
+
+    def attach_fdr(self, fdr: 'FlightDataRecorder') -> None:
+        """
+        Attach a Flight Data Recorder for telemetry logging.
+
+        Args:
+            fdr: FlightDataRecorder instance
+        """
+        self._fdr = fdr
+        self._fdr_enabled = True
+        if self.ship is not None:
+            fdr.set_spacecraft(self.ship)
+        logger.info("FDR attached to propagator")
+
+    def attach_controller(self, controller: 'MissionController') -> None:
+        """
+        Attach a MissionController for display and logging.
+
+        Args:
+            controller: MissionController instance
+        """
+        self._controller = controller
+        self._fdr_enabled = True
+        if self.ship is not None:
+            controller.set_spacecraft(self.ship)
+        if self.bodies is not None:
+            controller.set_bodies(self.bodies)
+        logger.info("MissionController attached to propagator")
+
+    def _record_telemetry(self, force: bool = False) -> None:
+        """Record current state to FDR/controller if attached."""
+        if self._fdr is not None:
+            self._fdr.record_frame(
+                self.t, self.y, self.ship, self.bodies, force=force
+            )
+        if self._controller is not None:
+            self._controller.update(
+                self.t, self.y, force=force
+            )
 
     def coast(
         self,
@@ -180,9 +253,20 @@ class Propagator:
             tau_control, dm_rcs = attitude_control(t, y, self.ship, self.guidance)
             q_dot = quaternion_derivative(q, omega)
 
+            # Compute disturbance torques (if model is enabled)
+            if self._disturbance_model is not None:
+                tau_disturbance = self._disturbance_model.total_disturbance(
+                    t, r, v, q, self.ship, self._current_soi_body, self.bodies
+                )
+            else:
+                tau_disturbance = np.zeros(3)
+
+            # Total torque = control + disturbance
+            tau_total = tau_control + tau_disturbance
+
             # Only compute rotational dynamics if ship has inertia defined
             if self.ship is not None and hasattr(self.ship, 'inertia'):
-                omega_dot = euler_rotation_equation(omega, self.ship.inertia, tau_control)
+                omega_dot = euler_rotation_equation(omega, self.ship.inertia, tau_total)
             else:
                 omega_dot = np.zeros(3)  # No rotation if no ship or inertia
 
@@ -284,5 +368,9 @@ class Propagator:
 
         # Log guidance cycles
         log_guidance(sol, self.guidance, self.result)
+
+        # Record telemetry to FDR/controller if attached
+        if self._fdr_enabled:
+            self._record_telemetry()
 
         return self.result

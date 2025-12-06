@@ -23,6 +23,10 @@ from .star_environment import (
     compute_srp_acceleration, estimate_srp_delta_v,
     MultiBodyAtmosphere, compute_drag_acceleration, ATMOSPHERE_PARAMS,
 )
+from .star_disturbance import (
+    DisturbanceTorqueModel,
+    create_default_disturbance_model, create_deep_space_disturbance_model, create_leo_disturbance_model,
+)
 from .star_power import (
     SolarPanel, Battery, PowerLoad, PowerSystem, PowerMode,
     detect_eclipse, detect_earth_eclipse, detect_moon_eclipse,
@@ -59,6 +63,14 @@ from .star_thermal import (
     hot_cold_case_temperatures, eclipse_cooldown_time, eclipse_warmup_time,
     estimate_heater_power, battery_sizing_for_eclipse, solar_panel_sizing,
 )
+from .star_fdr import (
+    FlightDataRecorder, TelemetryFrame, MissionEvent, MissionSummary,
+    create_fdr, generate_mission_plots,
+)
+from .star_console import (
+    ConsoleDisplay, DisplayMode, DisplayState, MissionController,
+    create_mission_controller,
+)
 
 __all__ = [
     "CONFIG",
@@ -77,6 +89,9 @@ __all__ = [
     "export_trajectory_csv", "import_trajectory_csv",
     "SolarRadiationPressure", "AtmosphericDrag", "EnvironmentModel",
     "compute_srp_acceleration", "estimate_srp_delta_v",
+    # Disturbance torques
+    "DisturbanceTorqueModel",
+    "create_default_disturbance_model", "create_deep_space_disturbance_model", "create_leo_disturbance_model",
     "SolarPanel", "Battery", "PowerLoad", "PowerSystem", "PowerMode",
     "detect_eclipse", "detect_earth_eclipse", "detect_moon_eclipse",
     "MultiBodyAtmosphere", "compute_drag_acceleration", "ATMOSPHERE_PARAMS",
@@ -107,5 +122,11 @@ __all__ = [
     "equilibrium_temperature", "compute_thermal_environment",
     "hot_cold_case_temperatures", "eclipse_cooldown_time", "eclipse_warmup_time",
     "estimate_heater_power", "battery_sizing_for_eclipse", "solar_panel_sizing",
+    # Flight Data Recorder
+    "FlightDataRecorder", "TelemetryFrame", "MissionEvent", "MissionSummary",
+    "create_fdr", "generate_mission_plots",
+    # Console Display
+    "ConsoleDisplay", "DisplayMode", "DisplayState", "MissionController",
+    "create_mission_controller",
 ]
 

@@ -82,6 +82,15 @@ class Spacecraft:
         self._rcs_propellant_mass = 0.0  # kg
         self._rcs_mdot_kgpd = 0.0  # RCS mass flow rate (kg/day) - set by attitude_control
 
+        # Disturbance torque geometry properties
+        # Body frame convention: +Z is thrust direction (aft), +X is "right", +Y is "up"
+        self._cp_offset = np.zeros(3)      # Aerodynamic center of pressure offset from CG (m)
+        self._srp_offset = np.zeros(3)     # Solar radiation pressure CP offset from CG (m)
+        self._srp_area = 100.0             # Effective SRP area (m²)
+        self._reflectivity = 1.5           # SRP reflectivity coefficient (1=absorb, 2=specular)
+        self._drag_area = 100.0            # Aerodynamic cross-sectional area (m²)
+        self._drag_coefficient = 2.2       # Aerodynamic drag coefficient
+
     @property ###
     def dry_mass(self) -> float:
         return self._dry_mass
@@ -645,6 +654,12 @@ def starship_raptor_vac() -> Spacecraft:
 
     Propellant budget includes ~5% margin for realistic pointing losses
     from attitude control (cos(θ) efficiency penalty during burns).
+
+    Geometry (body frame: +Z = thrust/aft, origin at CG):
+        - Length: ~50m (spacecraft section)
+        - Diameter: ~9m
+        - CP offset: Aerodynamic CP ~5m forward of CG for nose-first flight
+        - SRP offset: Solar CP ~2m from CG due to asymmetric solar panels
     """
     raptor = Thruster(thrust_max=2.6e6, isp=380.0)
     ship = Spacecraft(
@@ -657,6 +672,15 @@ def starship_raptor_vac() -> Spacecraft:
     # Add attitude control properties
     ship._inertia = np.diag([500_000, 500_000, 100_000])  # kg·m² (Ixx, Iyy, Izz)
     ship._rcs_propellant_mass = 2_000  # kg
+
+    # Disturbance torque geometry for Starship
+    # Body frame: +Z is aft (thrust direction), CG at origin
+    ship._cp_offset = np.array([0.0, 0.0, -5.0])    # Aero CP 5m forward of CG (nose-first flight)
+    ship._srp_offset = np.array([2.0, 0.0, 0.0])    # SRP CP 2m to side (asymmetric solar exposure)
+    ship._srp_area = 400.0                           # ~9m diameter × ~50m length × view factor
+    ship._reflectivity = 1.3                         # Stainless steel (partially reflective)
+    ship._drag_area = 65.0                           # π × (4.5m)² cross-section
+    ship._drag_coefficient = 2.2                     # Typical blunt body
 
     return ship
 

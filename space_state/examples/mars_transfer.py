@@ -1160,12 +1160,178 @@ def run_mission():
 
 
 # =============================================================================
+# Visualization
+# =============================================================================
+
+def visualize_mission(prop, design_params: dict, mode: str = 'static'):
+    """
+    Visualize the Mars transfer mission trajectory.
+
+    Args:
+        prop: Propagator with mission trajectory
+        design_params: Mission design parameters
+        mode: 'static' for matplotlib plots, 'interactive' for Plotly viewer
+    """
+    from visual import (
+        TrajectoryData,
+        BodyData,
+        EventMarker,
+        create_interactive_trajectory_viewer,
+        create_mission_dashboard,
+        trajectory_from_propagation_result,
+        run_mission_viewer,
+    )
+    from base.star_constants import BODIES, ts, epoch_jd, AU_TO_KM
+
+    print("\n" + "=" * 78)
+    print("  MISSION VISUALIZATION")
+    print("=" * 78)
+
+    # Convert propagation result to trajectory data
+    trajectory = trajectory_from_propagation_result(prop.result, name="Mars Transfer")
+
+    # Get body positions (simplified - using positions at departure and arrival)
+    optimal = design_params['optimal']
+    t_dep = optimal['departure_day']
+    t_arr = optimal['arrival_day']
+
+    time_dep = ts.tt_jd(epoch_jd + t_dep)
+    time_arr = ts.tt_jd(epoch_jd + t_arr)
+
+    # Earth at departure (origin for Earth-centered view)
+    earth_at_dep = BODIES['earth']['skyfield'].at(time_dep).position.au * AU_TO_KM
+
+    # Mars positions (simplified)
+    mars_at_arr = BODIES['mars']['skyfield'].at(time_arr).position.au * AU_TO_KM
+
+    # Create body data - for heliocentric view, bodies move
+    # For simplicity, use Sun at origin
+    sun = BodyData(
+        name="Sun",
+        positions=np.array([0, 0, 0]),
+        radius_km=696340.0,
+        color="yellow"
+    )
+
+    # Create event markers (position is required)
+    pos = trajectory.positions
+    times = trajectory.times
+
+    # Find trajectory indices for events
+    dep_idx = 0
+    arr_idx = len(times) - 1
+    tmi_idx = np.argmin(np.abs(times - (t_dep + 0.01)))
+    approach_idx = np.argmin(np.abs(times - (t_arr - 5)))
+
+    events = [
+        EventMarker(time=t_dep, position=pos[dep_idx], name="LEO Departure", color="green"),
+        EventMarker(time=t_dep + 0.01, position=pos[tmi_idx], name="TMI Burn", color="orange"),
+        EventMarker(time=t_arr - 5, position=pos[approach_idx], name="Mars Approach", color="yellow"),
+        EventMarker(time=t_arr, position=pos[arr_idx], name="MOI Burn", color="red"),
+    ]
+
+    if mode == 'static':
+        # Generate matplotlib plots
+        import matplotlib.pyplot as plt
+
+        fig = plt.figure(figsize=(14, 10))
+
+        # 3D trajectory plot
+        ax1 = fig.add_subplot(2, 2, 1, projection='3d')
+        pos = trajectory.positions
+        ax1.plot(pos[:, 0], pos[:, 1], pos[:, 2], 'b-', linewidth=0.5, alpha=0.7)
+        ax1.scatter([0], [0], [0], c='yellow', s=200, label='Sun')
+        ax1.scatter([pos[0, 0]], [pos[0, 1]], [pos[0, 2]], c='green', s=50, label='Departure')
+        ax1.scatter([pos[-1, 0]], [pos[-1, 1]], [pos[-1, 2]], c='red', s=50, label='Arrival')
+        ax1.set_xlabel('X (km)')
+        ax1.set_ylabel('Y (km)')
+        ax1.set_zlabel('Z (km)')
+        ax1.set_title('Heliocentric Trajectory')
+        ax1.legend()
+
+        # Distance to Mars over time
+        ax2 = fig.add_subplot(2, 2, 2)
+        r_helio = np.linalg.norm(pos, axis=1)
+        ax2.plot(trajectory.times, r_helio / 1e6)
+        ax2.set_xlabel('Time (days from epoch)')
+        ax2.set_ylabel('Heliocentric Distance (million km)')
+        ax2.set_title('Distance from Sun')
+        ax2.grid(True, alpha=0.3)
+
+        # Velocity profile
+        ax3 = fig.add_subplot(2, 2, 3)
+        v_mag = np.linalg.norm(trajectory.velocities, axis=1)
+        ax3.plot(trajectory.times, v_mag)
+        ax3.set_xlabel('Time (days from epoch)')
+        ax3.set_ylabel('Velocity (km/s)')
+        ax3.set_title('Heliocentric Velocity')
+        ax3.grid(True, alpha=0.3)
+
+        # Mass profile
+        ax4 = fig.add_subplot(2, 2, 4)
+        if trajectory.masses is not None:
+            ax4.plot(trajectory.times, trajectory.masses)
+            ax4.set_xlabel('Time (days from epoch)')
+            ax4.set_ylabel('Mass (kg)')
+            ax4.set_title('Spacecraft Mass')
+            ax4.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig('mars_transfer_trajectory.png', dpi=150, bbox_inches='tight')
+        print("  Saved: mars_transfer_trajectory.png")
+        plt.show()
+
+    elif mode == 'interactive':
+        # Launch interactive Plotly viewer
+        print("  Creating interactive trajectory viewer...")
+        fig = create_interactive_trajectory_viewer(
+            trajectory=trajectory,
+            bodies=[sun],
+            events=events,
+            title="Earth to Mars Transfer Mission"
+        )
+        fig.show()
+
+    elif mode == 'dashboard':
+        # Launch mission dashboard
+        print("  Creating mission dashboard...")
+        fig = create_mission_dashboard(
+            trajectory=trajectory,
+            central_body='sun',
+            show_elements=True,
+        )
+        fig.show()
+
+    elif mode == 'full':
+        # Launch full web app
+        print("  Launching interactive mission viewer...")
+        print("  Open your browser to: http://127.0.0.1:8051")
+        run_mission_viewer(
+            trajectory=trajectory,
+            bodies=[sun],
+            events=events,
+            port=8051,
+        )
+
+
+# =============================================================================
 # Entry Point
 # =============================================================================
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Earth to Mars Transfer Mission")
+    parser.add_argument('--visualize', choices=['none', 'static', 'interactive', 'dashboard', 'full'],
+                       default='static', help='Visualization mode (default: static)')
+    args = parser.parse_args()
+
     try:
         prop, ship, design = run_mission()
+
+        if args.visualize != 'none':
+            visualize_mission(prop, design, mode=args.visualize)
+
     except KeyboardInterrupt:
         print("\n\nMission aborted by user.")
     except Exception as e:

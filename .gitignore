@@ -32,3 +32,5 @@ ephemeris/
 # Other files
 *.txt
 *.png
+*.csv
+*.json

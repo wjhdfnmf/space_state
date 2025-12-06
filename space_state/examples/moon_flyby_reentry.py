@@ -73,6 +73,9 @@ from base import (
     BODIES, CONFIG, Propagator, starship_raptor_vac,
     get_circular_state,
     vis_viva, circular_velocity, orbital_period, escape_velocity,
+    # Mission logging imports
+    FlightDataRecorder, MissionController, DisplayMode,
+    create_fdr, generate_mission_plots,
 )
 from base.star_constants import AU_TO_KM, DAY_TO_SEC, KM_TO_AU, epoch_jd, ts
 from base.star_utils import (
@@ -163,6 +166,12 @@ class MoonFlybyConfig:
     SHOW_THERMAL_PLOTS = True
     SHOW_ATTITUDE_PLOTS = True
     SAVE_PLOTS = True
+    INTERACTIVE_MODE = 'static'  # 'static', 'interactive', 'dashboard', 'full'
+
+    # Mission logging
+    ENABLE_FDR = True
+    FDR_INTERVAL = 0.001  # Record every 0.001 days (~86 sec)
+    DISPLAY_MODE = DisplayMode.COMPACT
 
 
 # Physical constants
@@ -507,12 +516,12 @@ def phase4_lunar_transit(prop: Propagator, mission: dict) -> Propagator:
     print(f"  {'Day':<8} {'Dist Earth':<15} {'Dist Moon':<15} {'Velocity':<12}")
     print(f"  {'-'*8} {'-'*15} {'-'*15} {'-'*12}")
 
-    # Checkpoint propagation
-    n_checkpoints = 6
+    # Checkpoint propagation with high density (max_step=0.01 days = ~15 min)
+    n_checkpoints = 20  # Increased for better progress visibility
     checkpoints = np.linspace(prop.t, t_arrival - 0.1, n_checkpoints)
 
     for checkpoint in checkpoints:
-        prop.propagate(checkpoint, max_step=0.1)
+        prop.propagate(checkpoint, max_step=0.01)  # Fine resolution
 
         dist_earth = distance_to_body(prop.t, prop.y, earth, surface=True)
         dist_moon = distance_to_body(prop.t, prop.y, moon, surface=True)
@@ -537,10 +546,10 @@ def phase5_lunar_flyby(prop: Propagator, mission: dict) -> tuple:
     min_dist = float('inf')
     t_periapsis = prop.t
 
-    # Search for periapsis
-    step = 0.02  # ~30 minutes
+    # Search for periapsis with fine resolution (~15 min steps)
+    step = 0.01  # ~15 minutes
     while prop.t < t_start + 1.0:  # Search for 1 day
-        prop.propagate(prop.t + step, max_step=step)
+        prop.propagate(prop.t + step, max_step=0.005)  # Fine resolution for flyby
         dist = distance_to_body(prop.t, prop.y, moon, surface=True)
 
         if dist < min_dist:
@@ -598,13 +607,14 @@ def phase6_earth_return(prop: Propagator, mission: dict) -> tuple:
     print(f"  {'Day':<8} {'Dist Earth':<15} {'Dist Moon':<15} {'Velocity':<12}")
     print(f"  {'-'*8} {'-'*15} {'-'*15} {'-'*12}")
 
-    n_checkpoints = 6
+    # High density propagation (max_step=0.01 days = ~15 min)
+    n_checkpoints = 20  # Increased for better progress visibility
     checkpoints = np.linspace(prop.t, t_return, n_checkpoints)
 
     trajectory_data = []
 
     for checkpoint in checkpoints:
-        prop.propagate(checkpoint, max_step=0.1)
+        prop.propagate(checkpoint, max_step=0.01)  # Fine resolution
 
         dist_earth = distance_to_body(prop.t, prop.y, earth, surface=True)
         dist_moon = distance_to_body(prop.t, prop.y, moon, surface=True)
@@ -1069,37 +1079,148 @@ def run_mission() -> dict:
     print("=" * 70)
 
     results = {}
+    cfg = MoonFlybyConfig
+
+    # -------------------------------------------------------------------------
+    # MISSION CONTROLLER SETUP
+    # -------------------------------------------------------------------------
+    controller = None
+    if cfg.ENABLE_FDR:
+        controller = MissionController(
+            mission_name=cfg.NAME,
+            display_mode=cfg.DISPLAY_MODE,
+            enable_fdr=True,
+            fdr_interval=cfg.FDR_INTERVAL,
+            display_interval=5.0,  # Update every 5 seconds
+        )
+        controller.set_bodies(BODIES)
+        print(f"\n  FDR Enabled: Log directory = {controller.fdr.log_dir if controller.fdr else 'N/A'}")
 
     # Phase 1: Mission Design
+    if controller:
+        controller.begin_phase("MISSION DESIGN", "Computing free-return trajectory parameters")
     mission = phase1_mission_design()
     results['mission'] = mission
 
     # Phase 2: LEO Setup
+    if controller:
+        controller.begin_phase("LEO PARKING ORBIT", f"Altitude: {cfg.LEO_ALTITUDE_KM} km")
     prop = phase2_leo_setup(mission)
 
+    # Attach controller to propagator
+    if controller:
+        controller.set_spacecraft(prop.ship)
+        controller.set_start_time(prop.t)
+        controller.begin_mission()
+        prop.attach_controller(controller)
+
     # Phase 3: TLI Burn
+    if controller:
+        controller.begin_phase("TRANS-LUNAR INJECTION", f"Target C3: {mission['c3_km2s2']:.1f} km²/s²")
+        controller.start_burn(prop.t, "TLI Burn")
     prop = phase3_tli_burn(prop, mission)
+    if controller:
+        controller.end_burn(prop.t, "TLI Burn")
+        controller.log_event(prop.t, "TLI_COMPLETE", f"C3 achieved: {mission.get('c3_achieved', 0):.1f} km²/s²")
     results['post_tli'] = {'c3': mission.get('c3_achieved')}
 
     # Phase 4: Lunar Transit
+    if controller:
+        controller.begin_phase("TRANS-LUNAR COAST", "Coast to lunar encounter")
     prop = phase4_lunar_transit(prop, mission)
 
     # Phase 5: Lunar Flyby
+    if controller:
+        controller.begin_phase("LUNAR FLYBY", f"Target altitude: {cfg.FLYBY_ALTITUDE_KM} km")
     prop, flyby_data = phase5_lunar_flyby(prop, mission)
+    if controller and flyby_data:
+        controller.log_event(
+            flyby_data['periapsis_time'], "LUNAR_PERIAPSIS",
+            f"Flyby altitude: {flyby_data['altitude_km']:.0f} km, V∞: {flyby_data['v_infinity_km_s']:.2f} km/s"
+        )
     results['flyby'] = flyby_data
 
     # Phase 6: Earth Return
+    if controller:
+        controller.begin_phase("EARTH RETURN", "Free-return coast to Earth")
     prop, trajectory_data, entry_state = phase6_earth_return(prop, mission)
+    if controller and entry_state:
+        controller.log_event(
+            entry_state['time'], "ENTRY_INTERFACE",
+            f"Altitude: {entry_state['altitude_km']:.0f} km, V: {entry_state['velocity_km_s']:.2f} km/s, FPA: {entry_state['fpa_deg']:.1f}°"
+        )
     results['trajectory'] = trajectory_data
     results['entry_state'] = entry_state
+    results['propagator'] = prop  # Store full propagator for visualization
 
     # Phase 7: Atmospheric Entry
+    if controller:
+        controller.begin_phase("ATMOSPHERIC ENTRY", "Simulating reentry heating and deceleration")
     entry_result = phase7_atmospheric_entry(entry_state, mission)
+    if controller and entry_result:
+        controller.log_event(
+            prop.t, "ENTRY_COMPLETE",
+            f"Peak g: {entry_result.peak_deceleration_g:.1f}, Peak heat: {entry_result.peak_heat_rate_w_cm2:.0f} W/cm²"
+        )
     results['entry_result'] = entry_result
 
     # Phase 8: Thermal Analysis
+    if controller:
+        controller.begin_phase("THERMAL ANALYSIS", "TPS assessment and Apollo comparison")
     thermal_data = phase8_thermal_analysis(entry_result, mission)
     results['thermal'] = thermal_data
+
+    # -------------------------------------------------------------------------
+    # RECORD TRAJECTORY AND FINALIZE
+    # -------------------------------------------------------------------------
+    if controller and controller.fdr:
+        # Record full trajectory from propagation result
+        frames = controller.fdr.record_trajectory(prop.result, prop.ship, BODIES, downsample=5)
+        print(f"\n  Recorded {frames} trajectory frames to FDR")
+
+        # Force final update
+        controller.update(prop.t, prop.y, force=True)
+
+    # Validation
+    validation = validate_mission(mission, flyby_data, entry_state,
+                                  entry_result, thermal_data)
+    results['validation'] = validation
+
+    # -------------------------------------------------------------------------
+    # FINALIZE MISSION AND GENERATE PLOTS
+    # -------------------------------------------------------------------------
+    if controller:
+        mission_success = validation['passed'] >= validation['passed'] + validation['failed'] * 0.5
+        finalize_result = controller.finalize(
+            success=mission_success,
+            objectives=[
+                "LEO departure completed",
+                "TLI burn executed",
+                "Lunar flyby achieved",
+                "Free-return trajectory verified",
+                "Entry corridor analysis complete",
+            ]
+        )
+
+        if finalize_result:
+            print_header("MISSION DATA EXPORT")
+            summary = finalize_result['summary']
+            print(f"  Duration: {summary.duration_str}")
+            print(f"  Total Delta-V: {summary.total_delta_v_mps:.1f} m/s")
+            print(f"  Propellant Used: {summary.propellant_used_kg:,.0f} kg")
+            print()
+            print("  Saved Files:")
+            for fmt, path in finalize_result['files'].items():
+                print(f"    {fmt}: {path}")
+
+        # Generate mission plots
+        if controller.fdr:
+            print_header("GENERATING MISSION PLOTS")
+            plots = generate_mission_plots(controller.fdr, show=False)
+            for name, path in plots.items():
+                print(f"    {name}: {path}")
+
+        results['controller'] = controller
 
     # Visualization
     if MoonFlybyConfig.SHOW_TRAJECTORY_3D and trajectory_data:
@@ -1109,11 +1230,6 @@ def run_mission() -> dict:
         plot_entry_profile(entry_result)
         plot_thermal_analysis(entry_result, thermal_data)
 
-    # Validation
-    validation = validate_mission(mission, flyby_data, entry_state,
-                                  entry_result, thermal_data)
-    results['validation'] = validation
-
     # Final Summary
     print_header("MISSION COMPLETE")
     print(f"  Total Checks Passed: {validation['passed']}")
@@ -1122,5 +1238,142 @@ def run_mission() -> dict:
     return results
 
 
+# =============================================================================
+# Interactive Visualization
+# =============================================================================
+
+def visualize_mission_interactive(results: dict, mode: str = 'interactive'):
+    """
+    Launch interactive visualization for the Moon flyby mission.
+
+    Args:
+        results: Mission results dictionary
+        mode: 'interactive', 'dashboard', or 'full'
+    """
+    from visual import (
+        TrajectoryData,
+        BodyData,
+        EventMarker,
+        create_interactive_trajectory_viewer,
+        create_mission_dashboard,
+        run_mission_viewer,
+        trajectory_from_propagation_result,
+    )
+
+    print_header("INTERACTIVE MISSION VISUALIZATION")
+
+    # Use full propagator trajectory if available (preferred - contains all phases)
+    prop = results.get('propagator')
+    if prop is not None and hasattr(prop, 'result') and prop.result.t.size > 0:
+        print("  Using full propagation trajectory (all phases)")
+        trajectory = trajectory_from_propagation_result(prop.result, name="Moon Flyby Spacecraft")
+        trajectory.color = "cyan"
+        times = trajectory.times
+        positions = trajectory.positions
+        print(f"  Trajectory points: {len(times)}")
+        print(f"  Time span: {times[0]:.2f} to {times[-1]:.2f} days")
+    else:
+        # Fallback to manually collected trajectory data
+        trajectory_data = results.get('trajectory', [])
+        if not trajectory_data:
+            print("  No trajectory data available for visualization")
+            return
+
+        print("  Using manually collected trajectory (phase 6 only)")
+        times = np.array([p['time'] for p in trajectory_data])
+        positions = np.array([p['r'] for p in trajectory_data]) * AU_TO_KM  # km
+        velocities = np.array([p['v'] for p in trajectory_data]) * AU_TO_KM / DAY_TO_SEC if 'v' in trajectory_data[0] else None
+
+        trajectory = TrajectoryData(
+            times=times,
+            positions=positions,
+            velocities=velocities,
+            name="Moon Flyby Spacecraft",
+            color="cyan"
+        )
+
+    # Create body data for Earth and Moon
+    earth_body = BodyData(
+        name="Earth",
+        positions=np.array([0, 0, 0]),  # Simplified
+        radius_km=6378.137,
+        color="blue"
+    )
+
+    moon_body = BodyData(
+        name="Moon",
+        positions=np.array([384400, 0, 0]),  # Simplified average distance
+        radius_km=1737.4,
+        color="gray"
+    )
+
+    # Create event markers (position is required)
+    flyby_data = results.get('flyby', {})
+    events = [
+        EventMarker(time=times[0], position=positions[0], name="Launch", color="green"),
+        EventMarker(time=times[-1], position=positions[-1], name="Earth Return", color="red"),
+    ]
+
+    if flyby_data and 'periapsis_time' in flyby_data:
+        # Find closest trajectory point to flyby time
+        flyby_idx = np.argmin(np.abs(times - flyby_data['periapsis_time']))
+        events.append(EventMarker(
+            time=flyby_data['periapsis_time'],
+            position=positions[flyby_idx],
+            name="Lunar Flyby",
+            color="gray"
+        ))
+
+    if mode == 'interactive':
+        print("  Creating interactive trajectory viewer...")
+        fig = create_interactive_trajectory_viewer(
+            trajectory=trajectory,
+            bodies=[earth_body, moon_body],
+            events=events,
+            title="Circumlunar Free-Return Mission"
+        )
+        fig.show()
+
+    elif mode == 'dashboard':
+        print("  Creating mission dashboard...")
+        fig = create_mission_dashboard(
+            trajectory=trajectory,
+            central_body='earth',
+            show_elements=True,
+        )
+        fig.show()
+
+    elif mode == 'full':
+        print("  Launching interactive mission viewer...")
+        print("  Open your browser to: http://127.0.0.1:8052")
+        run_mission_viewer(
+            trajectory=trajectory,
+            bodies=[earth_body, moon_body],
+            events=events,
+            port=8052,
+        )
+
+
+# =============================================================================
+# Entry Point
+# =============================================================================
+
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Moon Flyby and Earth Reentry Mission")
+    parser.add_argument('--visualize', choices=['none', 'static', 'interactive', 'dashboard', 'full'],
+                       default='static', help='Visualization mode (default: static)')
+    args = parser.parse_args()
+
+    # Update config based on args
+    if args.visualize == 'none':
+        MoonFlybyConfig.SHOW_TRAJECTORY_3D = False
+        MoonFlybyConfig.SHOW_THERMAL_PLOTS = False
+    MoonFlybyConfig.INTERACTIVE_MODE = args.visualize
+
     results = run_mission()
+
+    # Launch interactive visualization if requested
+    if args.visualize in ['interactive', 'dashboard', 'full']:
+        visualize_mission_interactive(results, mode=args.visualize)
