@@ -4,9 +4,11 @@ A spacecraft trajectory simulator written from scratch in Python, paired with th
 
 The showcase is a complete Earth-to-Moon mission. A Starship-class vehicle leaves low Earth orbit, tilts its orbit into the Moon's plane, burns for the Moon, and is captured into lunar orbit **7.9 days later**.
 
-![Earth to Moon in 7.9 days](space_state/visual/images/hero_earth_to_moon.png)
+<p align="center">
+  <img src="space_state/visual/images/guided_insertion_burn.png" width="70%" alt="Guided insertion burn: Earth to Moon trajectory in 3D">
+</p>
 
-*The full mission in an Earth-centred view. The ship (blue) leaves a 400 km orbit, climbs the transfer ellipse to the Moon's path (dashed), and ends up circling the Moon. Orange dots mark the four engine burns. Rendered from a run of `tests/guidance_controller.py`.*
+*The full mission from the simulator's own 3D view (`visual/star_vis3D.py`), centred on Earth. The ship starts in low Earth orbit (green), climbs out to the Moon, and loops around it until the run ends (red). From a run of `tests/guidance_controller.py`.*
 
 A personal research project, built in my spare time.
 
@@ -23,18 +25,16 @@ A personal research project, built in my spare time.
 | 3 | Lunar orbit insertion | 5.14 d | — | 21 s | Slows the ship near the Moon (36,000 km out, 0.51 km/s relative) |
 | 4 | Circularization | 5.89 d | 312 m/s | 6 s | Circular orbit around the Moon at the point of closest approach |
 
-![Plane change at the ascending node](space_state/visual/images/plane_change.png)
-
-*Burn 1, the plane change. The ship starts in an equatorial orbit (dashed). The Moon orbits in a plane tilted about 28° from it (shaded). At the ascending node, where the two planes cross, a 370 s burn turns the velocity (arrows) and rotates the orbit into the Moon's plane (blue). The simulation flies 28.2° of the planned 28.4°, leaving the orbit within 1° of the Moon's plane.*
+The plane change flies 28.2° of the planned 28.4°, leaving the orbit within 1° of the Moon's plane.
 
 The ship then coasts for 2 days in a stable orbit 6,417–6,449 km above the Moon. Its energy relative to the Moon stays negative, so it is captured. The mission uses 1,082 t of propellant (98%), most of it on the plane change. Simulating the 7.9 days takes about 4 minutes.
 
 <p align="center">
-  <img src="space_state/visual/images/lunar_capture.png" width="49%" alt="Capture into lunar orbit, Moon-centred view">
+  <img src="space_state/visual/images/departure_vs_distance.png" width="49%" alt="Departure time vs Moon intercept distance">
   <img src="space_state/visual/images/lunar_insertion_search.png" width="49%" alt="Search for the closest approach to the Moon">
 </p>
 
-*Left: arrival seen from the Moon. The ship comes in from the right, slows with the insertion burn (top orange dot), then circularizes at closest approach. Right: the planner's search for that closest approach. It propagates 1,000 coast times in full N-body gravity and picks the minimum, 6,424 km at 5.89 days.*
+*Left: the departure-time sweep. For each candidate departure the planner predicts where the ship reaches apoapsis and how far that is from the Moon; the transfer burn goes at the minimum. Right: the search for closest approach after insertion. It propagates 1,000 coast times in full N-body gravity and picks the minimum, 6,424 km at 5.89 days.*
 
 ![Orbital metrics over the mission](space_state/visual/images/mission_metrics.png)
 
@@ -42,9 +42,14 @@ The ship then coasts for 2 days in a stable orbit 6,417–6,449 km above the Moo
 
 ### Holding a low lunar orbit
 
-`tests/orbit_moon.py` places the ship in a 100 km circular orbit around the Moon and propagates it for 24 hours under seven-body gravity. The altitude stays between **99.9 and 100.0 km** for all 12 revolutions: a good check that the integrator, constants and frame conversions agree.
+`tests/orbit_moon.py` places the ship in a 100 km circular orbit around the Moon and propagates it for 24 hours under seven-body gravity. The altitude stays between **99.94 and 100.02 km** for all 12 revolutions: a good check that the integrator, constants and frame conversions agree.
 
-![Lunar orbit: one lap every 2 hours](space_state/visual/images/lunar_orbit_spiral.png)
+<p align="center">
+  <img src="space_state/visual/images/orbiting_the_moon.png" width="42%" alt="Orbiting the Moon: 24 hours in 3D">
+  <img src="space_state/visual/images/lunar_orbit_metrics.png" width="56%" alt="Lunar orbit metrics dashboard">
+</p>
+
+*Left: the 3D view of the 24 hours. The Moon carries the orbit along its own path, so the 12 laps trace a coil. Right: the metrics dashboard for the same run; the Moon altitude panel shows the 0.08 km band.*
 
 ---
 
